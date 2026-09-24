@@ -415,26 +415,52 @@ def test_an_empty_symbol_list_is_a_422_not_a_500(client, path):
     assert len(store_module.list_runs(limit=1000)) == before
 
 
-def test_a_run_that_starts_insolvent_is_reported_as_blown_up(client):
-    """``cash <= 0`` is an account that is insolvent on its first bar: the
-    engine flags the blow-up and stops, nothing is ever appended to
-    ``equity_records``, and ``compute_metrics`` returns ``{}`` for an empty
-    run -- dropping the ``blown_up`` it was handed. The job itself raises
-    nothing, so this reached the panel as a green "done" over a grid of "n/a".
-    The router carries the engine's own flag across that gap; the panel keys
-    its red badge off it, so it has to survive both the job result and the
-    stored run row.
-    """
+@pytest.mark.parametrize('override, fragment', [
+    ({'cash': 0.0}, 'greater than 0'),
+    ({'cash': -5_000.0}, 'greater than 0'),
+    ({'start': '2024/01/01'}, 'YYYY-MM-DD'),
+    ({'end': '2024-02-30'}, 'YYYY-MM-DD'),
+    ({'start': '2024-06-01', 'end': '2024-01-01'}, 'is after end'),
+])
+def test_a_backtest_that_could_only_fail_is_refused_before_it_is_queued(client, override, fragment):
+    """Each of these used to be accepted, queued and recorded in history:
+    zero cash as a run "blown up" on bar 0, a bad date as a job error from
+    deep in pandas, a reversed window as "filtered data is empty"."""
+    before = len(store_module.list_runs(limit=1000))
+    resp = client.post('/api/backtest', json={
+        'strategy': 'double_ma', 'symbols': ['SA'],
+        'start': '2024-01-01', 'end': '2024-06-01', 'cash': 200_000.0, **override,
+    })
+    assert resp.status_code == 422, resp.text
+    assert fragment in json.dumps(resp.json())
+    assert len(store_module.list_runs(limit=1000)) == before
+
+
+def test_a_run_with_nothing_recorded_still_carries_the_engines_blown_up_flag(client, monkeypatch):
+    """``compute_metrics`` returns ``{}`` for a run with no recorded bars,
+    dropping the ``blown_up`` it was handed; the router carries the engine's
+    own flag across that gap. Zero cash was the way to reach it through the
+    API and is now a 422, so the engine's answer is stood in for here."""
+    import web.routers.backtest as backtest_router
+
+    def empty_blown_up_run(*_args, **_kwargs):
+        return {
+            'result': {'blown_up': True, 'equity_records': [], 'trade_logs': [],
+                       'signal_log': [], 'deferred': {}},
+            'metrics': {},
+        }
+
+    monkeypatch.setattr(backtest_router, 'run_single_backtest', empty_blown_up_run)
     body = client.post('/api/backtest', json={
         'strategy': 'double_ma', 'symbols': ['SA'],
-        'start': '2024-01-01', 'end': '2024-06-01', 'cash': 0.0, 'slippage': 0.0,
+        'start': '2024-01-01', 'end': '2024-06-01', 'cash': 200_000.0, 'slippage': 0.0,
     }).json()
 
     for _ in range(200):
         job = client.get(f"/api/jobs/{body['job_id']}").json()
         if job['status'] in ('done', 'error'):
             break
-        time.sleep(0.1)
+        time.sleep(0.05)
     assert job['status'] == 'done'
     assert job['result']['metrics']['blown_up'] is True
 
@@ -446,7 +472,8 @@ def test_a_run_that_starts_insolvent_is_reported_as_blown_up(client):
     row = next(r for r in client.get('/api/runs?kind=backtest').json() if r['id'] == body['run_id'])
     assert row['status'] == 'done' and row['metrics']['blown_up'] is True
 
-    # A solvent run over the same window must not be flagged.
+
+def test_a_solvent_run_is_not_flagged_blown_up(client):
     ok = client.post('/api/backtest', json={
         'strategy': 'double_ma', 'symbols': ['SA'],
         'start': '2024-01-01', 'end': '2024-06-01', 'cash': 200_000.0, 'slippage': 0.0,
@@ -458,7 +485,6 @@ def test_a_run_that_starts_insolvent_is_reported_as_blown_up(client):
         time.sleep(0.1)
     assert job['status'] == 'done'
     assert job['result']['metrics']['blown_up'] is False
-
 
 
 # ---------------------------------------------------------------------
@@ -756,6 +782,41 @@ def test_second_update_of_the_same_symbol_is_refused(client, monkeypatch):
     assert not data_router.job_manager.any_active()
 
 
+def test_a_failed_update_still_invalidates_the_caches(client, monkeypatch):
+    """SA is rewritten before CF fails, so SA's cached frames are already
+    stale. The invalidation used to sit after the ``finally`` and was skipped
+    by the raise, leaving the panel on pre-update data until a restart."""
+    import web.routers.data as data_router
+
+    class _FailsOnCF:
+        stale_keys = ()
+
+        def __init__(self, symbol):
+            self.symbol = symbol
+
+        def update(self, force=False, rebuild_only=False):
+            if self.symbol == 'CF':
+                raise RuntimeError('exchange said no')
+
+    invalidated = []
+    monkeypatch.setattr(data_router, 'DataUpdate', _FailsOnCF)
+    monkeypatch.setattr(data_router.market_cache, 'invalidate', lambda: invalidated.append('market'))
+    monkeypatch.setattr(data_router.bars_cache, 'invalidate', lambda: invalidated.append('bars'))
+
+    started = client.post('/api/data/update', json={'symbols': ['SA', 'CF']})
+    assert started.status_code == 200, started.text
+    job_id = started.json()['job_id']
+    for _ in range(300):
+        status = client.get(f'/api/jobs/{job_id}').json()['status']
+        if status in ('done', 'error'):
+            break
+        time.sleep(0.01)
+
+    assert status == 'error'
+    assert sorted(invalidated) == ['bars', 'market']
+    assert not ({'SA', 'CF'} & data_router._inflight), 'the failed run kept its claim'
+
+
 def test_update_refuses_force_together_with_rebuild_only(client):
     """The CLI puts these two in a mutually exclusive group; the API used to
     accept both, and ``DataUpdate`` then skipped the sync and dropped
@@ -923,6 +984,32 @@ def test_run_history_limit_cannot_be_widened_past_its_cap(client):
     # The honest range still works, default included.
     assert len(client.get('/api/runs?limit=2').json()) == 2
     assert len(client.get('/api/runs').json()) == 3
+
+
+def test_run_artifacts_follow_the_project_directory_when_it_moves(tmp_path, monkeypatch):
+    """The index used to store each artifact's absolute path, so moving the
+    project left every run in history opening with no equity curve or trades
+    -- and its file beyond the reach of pruning and Delete."""
+    import shutil
+
+    run_id = store_module.create_run(kind='backtest', strategy='S', symbols=['SA'])
+    store_module.finish_run(run_id, status='done', metrics={}, artifact={'equity_records': [{'equity': 1.0}]})
+    assert store_module.get_run(run_id)['artifact_path'] == f'{run_id}.json'
+
+    moved = tmp_path / 'moved' / 'web_results'
+    shutil.move(store_module.WEB_RESULTS_DIR, moved)
+    monkeypatch.setattr(store_module, 'WEB_RESULTS_DIR', str(moved))
+    assert store_module.get_artifact(run_id) == {'equity_records': [{'equity': 1.0}]}
+
+    # A row written by an older version, holding the absolute path of a
+    # checkout that is no longer there.
+    conn = store_module._get_conn()
+    conn.execute('UPDATE runs SET artifact_path=? WHERE id=?', (f'/gone/checkout/results/web/{run_id}.json', run_id))
+    conn.commit()
+    assert store_module.get_artifact(run_id) == {'equity_records': [{'equity': 1.0}]}
+
+    assert store_module.delete_run(run_id)
+    assert not (moved / f'{run_id}.json').exists(), 'Delete could not find the file to remove'
 
 
 def test_a_run_still_in_flight_cannot_be_deleted(client):
@@ -1200,3 +1287,610 @@ def test_data_update_refuses_an_empty_selection_but_omitting_it_means_all(client
     assert DataUpdateRequest(symbols=['SA']).symbols == ['SA']
 
     assert not data_router.job_manager.any_active()
+
+
+# ---------------------------------------------------------------------
+# Indicators: catalog, values, and param overrides from a URL
+# ---------------------------------------------------------------------
+
+@pytest.fixture
+def synthetic_bars(monkeypatch):
+    """Serve the indicator/bars routes a frame instead of a CSV.
+
+    Patches the cache rather than ``DataManager``, because that is the seam
+    both ``product_bars`` and the indicator route actually go through -- and
+    it keeps the suite runnable with no downloaded data, the way every other
+    fixture here does.
+    """
+    from tests.test_indicators_pkg import build_frame
+    import web.barscache as barscache_module
+
+    frame = build_frame(n_bars=300)
+    monkeypatch.setattr(barscache_module.cache, 'get', lambda *a, **kw: frame)
+    return frame
+
+
+def test_indicator_catalog_describes_the_drawing_contract(client):
+    resp = client.get('/api/indicators')
+    assert resp.status_code == 200, resp.text
+    catalog = {e['key']: e for e in resp.json()}
+
+    assert {'ma', 'ema', 'macd', 'rsi', 'bollinger', 'atr'} <= set(catalog)
+
+    rsi = catalog['rsi']
+    assert rsi['pane'] == 'sub'
+    assert rsi['value_range'] == {'min': 0, 'max': 100}
+    assert rsi['guides'] == [30, 70]
+    assert rsi['precision'] == 1
+    assert rsi['errors'] == []
+    assert rsi['space']['period'] == {'kind': 'int', 'low': 2, 'high': 100, 'step': 1, 'log': False}
+
+    # Colour travels as the declaration, never a resolved hex: the panel picks
+    # light/dark at render time with no refetch.
+    hist = next(o for o in catalog['macd']['outputs'] if o['key'] == 'hist')
+    assert hist['kind'] == 'bar'
+    assert hist['color'] == ['up', 'down']
+    assert catalog['ma']['pane'] == 'main'
+
+
+def test_indicator_detail_and_unknown_key(client):
+    assert client.get('/api/indicators/macd').json()['class_name'] == 'Macd'
+    assert client.get('/api/indicators/nope').status_code == 404
+
+
+def test_indicator_values_carry_dates_and_the_warmup(client, synthetic_bars):
+    resp = client.get('/api/products/SA/indicators/macd')
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body['symbol'] == 'SA'
+    assert body['indicator'] == 'macd'
+    assert body['params'] == {'fast': 12, 'slow': 26, 'signal': 9}
+    assert len(body['dates']) == len(synthetic_bars)
+    assert body['dates'][0] == '2020-01-01'
+
+    for key in ('macd', 'signal', 'hist'):
+        series = body['outputs'][key]
+        assert len(series['values']) == len(synthetic_bars)
+        # NaN serializes as null, and `valid_from` says where the line starts
+        # so a window longer than the range reads as "needs more bars" rather
+        # than as an unexplained blank pane.
+        assert series['valid_from'] == 33
+        assert series['values'][:33] == [None] * 33
+        assert series['values'][33] is not None
+
+
+def test_indicator_values_report_an_all_nan_output_as_no_warmup(client, synthetic_bars):
+    """A 250-period MA over 300 bars is fine; over a short range it is not,
+    and `valid_from: null` is what lets the UI say so."""
+    resp = client.get('/api/products/SA/indicators/rsi?p=period=100')
+    assert resp.status_code == 200, resp.text
+    assert resp.json()['outputs']['rsi']['valid_from'] == 100
+
+
+def test_indicator_param_overrides_are_applied_and_echoed(client, synthetic_bars):
+    body = client.get('/api/products/SA/indicators/macd?p=fast=5&p=slow=40').json()
+    assert body['params'] == {'fast': 5, 'slow': 40, 'signal': 9}
+    # The override actually reached the computation, not just the echo.
+    assert body['outputs']['macd']['valid_from'] != 33
+
+
+@pytest.mark.parametrize('query, why', [
+    ('p=bogus=3', 'a param the class never declared'),
+    ('p=period=99999', 'outside the declared space'),
+    ('p=period=1e400', 'non-finite'),
+    ('p=period=nan', 'not a number'),
+    ('p=period', 'malformed token'),
+    ('p=period=2.5', 'not an integer'),
+])
+def test_indicator_rejects_a_hostile_param(client, synthetic_bars, query, why):
+    resp = client.get(f'/api/products/SA/indicators/rsi?{query}')
+    assert resp.status_code == 422, f'{why}: {resp.text}'
+
+
+def test_indicator_rejects_params_violating_a_declared_constraint(client, synthetic_bars):
+    """``Macd`` declares ``fast < slow``; reuse of ``check_constraints`` means
+    the class says so once and both the CLI and the URL honour it."""
+    resp = client.get('/api/products/SA/indicators/macd?p=fast=30&p=slow=10')
+    assert resp.status_code == 422, resp.text
+    assert 'constraint' in resp.json()['detail']
+
+
+def test_indicator_rejects_too_many_overrides(client, synthetic_bars):
+    query = '&'.join('p=period=14' for _ in range(40))
+    assert client.get(f'/api/products/SA/indicators/rsi?{query}').status_code == 422
+
+
+def test_indicator_values_for_an_unknown_product_or_key(client, synthetic_bars):
+    assert client.get('/api/products/ZZZ/indicators/rsi').status_code == 404
+    assert client.get('/api/products/SA/indicators/nope').status_code == 404
+
+
+def _write_indicator(tmp_path, monkeypatch, name: str, body: str):
+    """Drop a module into a throwaway directory appended to the package path,
+    so a test can register an indicator without writing into ``indicators/``.
+
+    Any module already imported under the same name is dropped first -- a
+    parametrized test reuses the name, and would otherwise be handed the
+    previous case's module straight out of ``sys.modules``.
+    """
+    import indicators
+
+    sys.modules.pop(f'indicators.{name}', None)
+    (tmp_path / f'{name}.py').write_text(body, encoding='utf-8')
+    monkeypatch.setattr(indicators, '__path__', [*indicators.__path__, str(tmp_path)])
+
+
+def test_a_raising_compute_is_the_users_error_not_a_500(client, synthetic_bars, tmp_path, monkeypatch):
+    """The user wrote that code seconds ago; the exception message is their
+    feedback loop, so it comes back as a 422 naming the class."""
+    _write_indicator(tmp_path, monkeypatch, 'ftk_raises', (
+        'from indicators.base import Indicator, Output\n'
+        'class FtkRaises(Indicator):\n'
+        '    outputs = (Output("x"),)\n'
+        '    def compute(self, ctx, sym):\n'
+        '        raise RuntimeError("boom from user code")\n'
+    ))
+    resp = client.get('/api/products/SA/indicators/ftk_raises')
+    assert resp.status_code == 422, resp.text
+    assert 'FtkRaises' in resp.json()['detail']
+    assert 'boom from user code' in resp.json()['detail']
+
+
+def test_a_wrong_length_output_is_rejected(client, synthetic_bars, tmp_path, monkeypatch):
+    _write_indicator(tmp_path, monkeypatch, 'ftk_short', (
+        'import numpy as np\n'
+        'from indicators.base import Indicator, Output\n'
+        'class FtkShort(Indicator):\n'
+        '    outputs = (Output("x"),)\n'
+        '    def compute(self, ctx, sym):\n'
+        '        return {"x": np.zeros(7)}\n'
+    ))
+    resp = client.get('/api/products/SA/indicators/ftk_short')
+    assert resp.status_code == 422, resp.text
+    assert 'expected (300,)' in resp.json()['detail']
+
+
+def test_a_missing_declared_output_is_rejected(client, synthetic_bars, tmp_path, monkeypatch):
+    _write_indicator(tmp_path, monkeypatch, 'ftk_missing', (
+        'import numpy as np\n'
+        'from indicators.base import Indicator, Output\n'
+        'class FtkMissing(Indicator):\n'
+        '    outputs = (Output("declared"),)\n'
+        '    def compute(self, ctx, sym):\n'
+        '        return {"returned": np.zeros(300)}\n'
+    ))
+    resp = client.get('/api/products/SA/indicators/ftk_missing')
+    assert resp.status_code == 422, resp.text
+    assert 'declared' in resp.json()['detail']
+
+
+def test_an_unimportable_module_costs_one_catalog_entry(client, tmp_path, monkeypatch):
+    """One typo mid-edit must not blank the picker."""
+    _write_indicator(tmp_path, monkeypatch, 'ftk_syntax', 'this is not python (\n')
+
+    catalog = {e['key']: e for e in client.get('/api/indicators').json()}
+    assert 'macd' in catalog and catalog['macd']['errors'] == []
+    broken = catalog['ftk_syntax']
+    assert broken['errors'] and 'SyntaxError' in broken['errors'][0]
+    assert broken['outputs'] == []
+
+
+def test_indicator_detail_refuses_a_module_path_key_without_importing_it(client, tmp_path, monkeypatch):
+    """Same invariant the strategy routes hold: a key from a URL never
+    reaches ``importlib``. Asserting on the marker rather than the status
+    alone is the point -- a 404 is compatible with the module having already
+    run its top-level code."""
+    marker = _import_probe(tmp_path, monkeypatch, 'ftk_probe_indicator')
+    resp = client.get('/api/indicators/ftk_probe_indicator:NotAStrategy')
+    assert resp.status_code == 404, resp.text
+    assert not marker.exists(), 'the URL path got to import a module'
+    assert 'ftk_probe_indicator' not in sys.modules
+
+
+def test_indicator_values_refuse_a_module_path_key_without_importing_it(client, tmp_path, monkeypatch):
+    marker = _import_probe(tmp_path, monkeypatch, 'ftk_probe_values')
+    resp = client.get('/api/products/SA/indicators/ftk_probe_values:NotAStrategy')
+    assert resp.status_code == 404, resp.text
+    assert not marker.exists(), 'the URL path got to import a module'
+    assert 'ftk_probe_values' not in sys.modules
+
+
+def test_indicator_reload_is_not_blocked_by_a_running_job(client, monkeypatch):
+    """Unlike ``strategies/reload``: that 409 exists because a running
+    backtest holds a ``Strategy`` class object, and nothing holds an
+    ``Indicator`` across a request."""
+    import web.routers.indicators as indicators_router
+
+    monkeypatch.setattr(jobs_module.manager, 'any_active', lambda: True)
+    resp = client.post('/api/indicators/reload')
+    assert resp.status_code == 200, resp.text
+    assert resp.json()['reloaded'] is True
+    assert 'macd' in resp.json()['indicators']
+    assert resp.json()['failed'] == {}
+    assert indicators_router is not None
+
+
+def test_indicator_reload_leaves_the_base_class_alone(client):
+    """Reloading ``indicators.base`` would swap in a new ``Indicator`` object
+    that every already-defined subclass no longer descends from, silently
+    emptying the registry."""
+    from indicators import Indicator as before
+
+    assert client.post('/api/indicators/reload').status_code == 200
+
+    from indicators import Indicator as after
+    assert before is after
+    assert client.get('/api/indicators').json(), 'the registry emptied on reload'
+
+
+def test_a_badly_declared_class_costs_one_entry_not_the_catalog(client, tmp_path, monkeypatch):
+    """Imports fine, declares nonsense. Every field `_describe` reads is one a
+    user typed, so none of them may raise past it."""
+    _write_indicator(tmp_path, monkeypatch, 'ftk_nonsense', (
+        'from indicators.base import Indicator, Output\n'
+        'class FtkNonsense(Indicator):\n'
+        '    pane = 3\n'
+        '    precision = "two"\n'
+        '    guides = 30\n'
+        '    outputs = Output("x")\n'  # missing trailing comma
+    ))
+    resp = client.get('/api/indicators')
+    assert resp.status_code == 200, resp.text
+    catalog = {e['key']: e for e in resp.json()}
+    assert catalog['macd']['errors'] == [], 'one bad class took a healthy one down'
+    assert catalog['ftk_nonsense']['errors']
+
+
+def test_a_failed_reload_does_not_leave_the_old_class_registered(client, tmp_path, monkeypatch):
+    """The stale module would otherwise stay in `sys.modules`, so the catalog
+    would report the indicator as healthy and the chart would go on drawing
+    pre-edit code -- the opposite of what clicking Reload asks for."""
+    module = tmp_path / 'ftk_edited.py'
+    module.write_text(
+        'from indicators.base import Indicator, Output\n'
+        'class FtkEdited(Indicator):\n'
+        '    outputs = (Output("x"),)\n',
+        encoding='utf-8',
+    )
+    import indicators
+    monkeypatch.setattr(indicators, '__path__', [*indicators.__path__, str(tmp_path)])
+
+    assert 'ftk_edited' in {e['key'] for e in client.get('/api/indicators').json()}
+
+    # The user now saves a version that does not compile.
+    module.write_text('def broken(\n', encoding='utf-8')
+    reloaded = client.post('/api/indicators/reload')
+    assert reloaded.status_code == 200, reloaded.text
+    assert any('ftk_edited' in mod for mod in reloaded.json()['failed'])
+
+    entry = next(e for e in client.get('/api/indicators').json() if e['key'] == 'ftk_edited')
+    assert entry['errors'], 'the catalog still reports the pre-edit class as healthy'
+    monkeypatch.delitem(sys.modules, 'ftk_edited', raising=False)
+    sys.modules.pop('indicators.ftk_edited', None)
+
+
+def test_reload_drops_a_renamed_indicator_class(client, tmp_path, monkeypatch):
+    """``importlib.reload`` re-executes into the module's existing namespace,
+    so a class renamed in the edit used to survive under its old name: listed
+    in the catalog, and still computable with pre-edit code."""
+    module = tmp_path / 'ftk_renamed.py'
+    module.write_text(
+        'from indicators.base import Indicator, Output\n'
+        'class FtkBefore(Indicator):\n'
+        '    outputs = (Output("x"),)\n',
+        encoding='utf-8',
+    )
+    import indicators
+    monkeypatch.setattr(indicators, '__path__', [*indicators.__path__, str(tmp_path)])
+    assert 'ftk_before' in {e['key'] for e in client.get('/api/indicators').json()}
+
+    # A different length as well as a different name, so a same-second rewrite
+    # cannot be served from the bytecode cache (it validates mtime *and* size).
+    module.write_text(
+        'from indicators.base import Indicator, Output\n'
+        'class FtkAfterRename(Indicator):\n'
+        '    outputs = (Output("x"),)\n',
+        encoding='utf-8',
+    )
+    reloaded = client.post('/api/indicators/reload')
+    assert reloaded.status_code == 200, reloaded.text
+    assert 'ftk_after_rename' in reloaded.json()['indicators']
+    assert 'ftk_before' not in reloaded.json()['indicators'], 'the pre-edit class survived the reload'
+    assert client.get('/api/indicators/ftk_before').status_code == 404
+    sys.modules.pop('indicators.ftk_renamed', None)
+
+
+def test_strategy_reload_drops_a_renamed_class(client, tmp_path, monkeypatch):
+    """Same ``importlib.reload`` trap on the strategy side, where the stale
+    class would stay selectable for a backtest."""
+    module = tmp_path / 'ftk_renamed_strategy.py'
+    module.write_text(
+        'from strategies.base import Strategy\n'
+        'class FtkBeforeStrategy(Strategy):\n'
+        '    pass\n',
+        encoding='utf-8',
+    )
+    import strategies
+    monkeypatch.setattr(strategies, '__path__', [*strategies.__path__, str(tmp_path)])
+    assert 'ftk_before' in {e['key'] for e in client.get('/api/strategies').json()}
+
+    module.write_text(
+        'from strategies.base import Strategy\n'
+        'class FtkAfterRenameStrategy(Strategy):\n'
+        '    pass\n',
+        encoding='utf-8',
+    )
+    reloaded = client.post('/api/strategies/reload')
+    assert reloaded.status_code == 200, reloaded.text
+    assert 'ftk_after_rename' in reloaded.json()['strategies']
+    assert 'ftk_before' not in reloaded.json()['strategies'], 'the pre-edit class survived the reload'
+    sys.modules.pop('strategies.ftk_renamed_strategy', None)
+
+
+def test_reload_keeps_the_strategy_base_class(client):
+    """The strategy-side twin of
+    ``test_indicator_reload_leaves_the_base_class_alone``."""
+    from strategies import Strategy as before
+
+    assert client.post('/api/strategies/reload').status_code == 200
+
+    from strategies import Strategy as after
+    assert before is after
+    assert client.get('/api/strategies').json(), 'the registry emptied on reload'
+
+
+def _write_strategy(tmp_path, monkeypatch, name: str, body: str):
+    """The strategy-side ``_write_indicator``: a module in a throwaway
+    directory appended to the package path, never in ``strategies/``."""
+    import strategies
+
+    sys.modules.pop(f'strategies.{name}', None)
+    (tmp_path / f'{name}.py').write_text(body, encoding='utf-8')
+    monkeypatch.setattr(strategies, '__path__', [*strategies.__path__, str(tmp_path)])
+
+
+def test_an_unimportable_strategy_costs_one_entry_not_the_panel(client, tmp_path, monkeypatch):
+    """One private file saved mid-edit used to 500 the list, the reload and
+    every backtest -- whichever strategy was asked for -- with no message."""
+    _write_strategy(tmp_path, monkeypatch, 'ftk_syntax_strategy', 'def broken(\n')
+
+    listed = client.get('/api/strategies')
+    assert listed.status_code == 200, listed.text
+    catalog = {e['key']: e for e in listed.json()}
+    assert catalog['double_ma']['errors'] == []
+    assert 'SyntaxError' in catalog['ftk_syntax_strategy']['errors'][0]
+
+    assert client.get('/api/strategies/double_ma').status_code == 200
+
+    reloaded = client.post('/api/strategies/reload')
+    assert reloaded.status_code == 200, reloaded.text
+    assert 'double_ma' in reloaded.json()['strategies']
+    assert 'SyntaxError' in reloaded.json()['failed']['strategies.ftk_syntax_strategy']
+
+    # Asked for by name, the broken one says why rather than "unknown".
+    missing = client.get('/api/strategies/ftk_syntax')
+    assert missing.status_code == 404
+    assert 'ftk_syntax_strategy' in missing.json()['detail']
+    assert 'SyntaxError' in missing.json()['detail']
+
+
+@pytest.mark.parametrize('declaration', [
+    '    space = {"period": (2, 100)}\n',   # a bare tuple where Int(2, 100) belongs
+    '    fixed_params = 5\n',               # not iterable
+])
+def test_a_malformed_strategy_space_costs_one_entry_not_the_catalog(client, tmp_path, monkeypatch, declaration):
+    """``resolve_space`` raises ``TypeError`` for these, which the strategy
+    ``_describe`` let through just as the indicator one once did."""
+    _write_strategy(tmp_path, monkeypatch, 'ftk_badspace_strategy', (
+        'from strategies.base import Strategy\n'
+        'class FtkBadspaceStrategy(Strategy):\n'
+        '    params = {"period": 14}\n'
+        + declaration
+    ))
+    resp = client.get('/api/strategies')
+    assert resp.status_code == 200, resp.text
+    catalog = {e['key']: e for e in resp.json()}
+    assert catalog['double_ma']['errors'] == [], 'one bad class took a healthy one down'
+    assert catalog['ftk_badspace']['space_error']
+    sys.modules.pop('strategies.ftk_badspace_strategy', None)
+
+
+def test_strategy_reload_checks_for_jobs_inside_hold_starts(client, monkeypatch):
+    """Checked outside it, a backtest could be submitted between the check and
+    the reload -- the race ``hold_starts`` exists to close for registry
+    writes."""
+    import contextlib
+
+    import web.routers.strategies as strategies_router
+
+    inside = []
+    checked_inside = []
+
+    @contextlib.contextmanager
+    def spy_hold_starts():
+        inside.append(True)
+        try:
+            yield
+        finally:
+            inside.pop()
+
+    def spy_any_active():
+        checked_inside.append(bool(inside))
+        return False
+
+    monkeypatch.setattr(strategies_router.job_manager, 'hold_starts', spy_hold_starts)
+    monkeypatch.setattr(strategies_router.job_manager, 'any_active', spy_any_active)
+    assert client.post('/api/strategies/reload').status_code == 200
+    assert checked_inside == [True]
+
+    monkeypatch.setattr(strategies_router.job_manager, 'any_active', lambda: True)
+    assert client.post('/api/strategies/reload').status_code == 409
+
+
+@pytest.mark.parametrize('declaration', [
+    '    space = {"period": (2, 100)}\n',   # a bare tuple where Int(2, 100) belongs
+    '    fixed_params = 5\n',               # not iterable
+])
+def test_a_malformed_space_costs_one_entry_not_the_catalog(client, tmp_path, monkeypatch, declaration):
+    """``resolve_space`` raises ``TypeError`` rather than ``ValueError`` for
+    these, which ``_describe`` used to let through -- 500ing the catalog and
+    blanking the picker for every healthy indicator."""
+    _write_indicator(tmp_path, monkeypatch, 'ftk_badspace', (
+        'from indicators.base import Indicator, Output\n'
+        'class FtkBadspace(Indicator):\n'
+        '    params = {"period": 14}\n'
+        + declaration +
+        '    outputs = (Output("x"),)\n'
+    ))
+    resp = client.get('/api/indicators')
+    assert resp.status_code == 200, resp.text
+    catalog = {e['key']: e for e in resp.json()}
+    assert catalog['macd']['errors'] == [], 'one bad class took a healthy one down'
+    assert catalog['ftk_badspace']['space_error']
+    assert client.get('/api/indicators/ftk_badspace').status_code == 200
+
+
+@pytest.mark.parametrize('declaration', [
+    '    space = {"period": (2, 100)}\n',   # reaches `_overrides` as a tuple, not a Spec
+    '    fixed_params = 5\n',               # makes `resolve_space` itself raise
+])
+def test_an_override_against_a_malformed_space_is_refused(
+    client, synthetic_bars, tmp_path, monkeypatch, declaration,
+):
+    """Not a 500, and not accepted either: the author tried to bound the
+    param, so the loose backstop is no substitute for the range they meant."""
+    _write_indicator(tmp_path, monkeypatch, 'ftk_badspace_values', (
+        'from indicators.base import Indicator, Output\n'
+        'class FtkBadspaceValues(Indicator):\n'
+        '    params = {"period": 14}\n'
+        + declaration +
+        '    outputs = (Output("x"),)\n'
+        '    def compute(self, ctx, sym):\n'
+        '        return {"x": ctx.close(sym)}\n'
+    ))
+    # Defaults still compute -- only overriding needs the space.
+    assert client.get('/api/products/SA/indicators/ftk_badspace_values').status_code == 200
+    resp = client.get('/api/products/SA/indicators/ftk_badspace_values?p=period=20')
+    assert resp.status_code == 422, resp.text
+    assert 'space' in resp.json()['detail']
+
+
+def test_a_param_with_no_inferable_range_is_still_bounded(client, synthetic_bars, tmp_path, monkeypatch):
+    """`_infer_spec` gives no range to a non-positive int default, so the
+    declared-space check cannot fire and the backstop has to."""
+    _write_indicator(tmp_path, monkeypatch, 'ftk_offset', (
+        'import numpy as np\n'
+        'from indicators.base import Indicator, Output\n'
+        'class FtkOffset(Indicator):\n'
+        '    params = {"offset": 0}\n'
+        '    outputs = (Output("x"),)\n'
+        '    def compute(self, ctx, sym):\n'
+        '        return {"x": ctx.close(sym) + self.p["offset"]}\n'
+    ))
+    assert client.get('/api/products/SA/indicators/ftk_offset?p=offset=5').status_code == 200
+    resp = client.get('/api/products/SA/indicators/ftk_offset?p=offset=99999999999')
+    assert resp.status_code == 422, resp.text
+    assert 'implausibly large' in resp.json()['detail']
+
+
+@pytest.mark.parametrize('declaration, query, why', [
+    ('', 'p=period=99999999999', 'a number for a None default skipped the backstop'),
+    ('', 'p=period=nan', 'nor was it checked for being finite'),
+    ('    space = {"period": Int(2, 100)}\n', 'p=period=500', 'or against its declared range'),
+    ('    space = {"period": Int(2, 100)}\n', 'p=period=abc', 'a string against a numeric space'),
+])
+def test_a_param_with_a_none_default_is_still_bounded(
+    client, synthetic_bars, tmp_path, monkeypatch, declaration, query, why,
+):
+    """``period = None`` -- "pick a sensible window yourself" -- gives
+    ``_coerce`` no type to pin to, and it used to return whatever arrived."""
+    _write_indicator(tmp_path, monkeypatch, 'ftk_nonedefault', (
+        'from indicators.base import Indicator, Int, Output\n'
+        'class FtkNonedefault(Indicator):\n'
+        '    params = {"period": None}\n'
+        + declaration +
+        '    outputs = (Output("x"),)\n'
+        '    def compute(self, ctx, sym):\n'
+        '        return {"x": ctx.close(sym)}\n'
+    ))
+    assert client.get('/api/products/SA/indicators/ftk_nonedefault?p=period=20').status_code == 200
+    resp = client.get(f'/api/products/SA/indicators/ftk_nonedefault?{query}')
+    assert resp.status_code == 422, f'{why}: {resp.text}'
+
+
+def test_a_raising_constraint_is_the_users_error_not_a_500(client, synthetic_bars, tmp_path, monkeypatch):
+    _write_indicator(tmp_path, monkeypatch, 'ftk_badconstraint', (
+        'from indicators.base import Indicator, Output\n'
+        'class FtkBadconstraint(Indicator):\n'
+        '    params = {"period": 14}\n'
+        '    constraints = (lambda p: p["no_such_param"] > 0,)\n'
+        '    outputs = (Output("x"),)\n'
+        '    def compute(self, ctx, sym):\n'
+        '        return {"x": ctx.close(sym)}\n'
+    ))
+    resp = client.get('/api/products/SA/indicators/ftk_badconstraint?p=period=20')
+    assert resp.status_code == 422, resp.text
+    assert 'KeyError' in resp.json()['detail']
+
+
+def test_a_name_clash_shows_both_modules_as_errors_in_the_catalog(client, synthetic_bars, tmp_path, monkeypatch):
+    source = (
+        'from indicators.base import Indicator, Output\n'
+        'class FtkWebClash(Indicator):\n'
+        '    outputs = (Output("x"),)\n'
+    )
+    _write_indicator(tmp_path, monkeypatch, 'ftk_web_clash_a', source)
+    _write_indicator(tmp_path, monkeypatch, 'ftk_web_clash_b', source)
+
+    catalog = {e['key']: e for e in client.get('/api/indicators').json()}
+    assert 'ftk_web_clash' not in catalog
+    for key in ('ftk_web_clash_a', 'ftk_web_clash_b'):
+        assert 'share the short name' in catalog[key]['errors'][0]
+    assert client.get('/api/products/SA/indicators/ftk_web_clash').status_code == 404
+
+
+def test_a_broken_entry_never_shares_a_key_with_a_working_class(client, tmp_path, monkeypatch):
+    """``ftk_keyed.py`` holds a healthy ``FtkKeyed`` *and* one side of a
+    clash, so its module-level error entry would otherwise take the key
+    ``ftk_keyed`` too -- and the picker would tick both rows as one."""
+    _write_indicator(tmp_path, monkeypatch, 'ftk_keyed', (
+        'from indicators.base import Indicator, Output\n'
+        'class FtkKeyed(Indicator):\n'
+        '    outputs = (Output("x"),)\n'
+        'class FtkKeyedDup(Indicator):\n'
+        '    outputs = (Output("x"),)\n'
+    ))
+    _write_indicator(tmp_path, monkeypatch, 'ftk_keyed_elsewhere', (
+        'from indicators.base import Indicator, Output\n'
+        'class FtkKeyedDup(Indicator):\n'
+        '    outputs = (Output("x"),)\n'
+    ))
+
+    entries = client.get('/api/indicators').json()
+    keys = [e['key'] for e in entries]
+    assert len(keys) == len(set(keys)), f'duplicate catalog keys: {sorted(keys)}'
+
+    by_key = {e['key']: e for e in entries}
+    assert by_key['ftk_keyed']['errors'] == [], 'the healthy class lost its entry'
+    assert by_key['indicators.ftk_keyed']['errors']
+    # A module with no healthy class of that name keeps the short key.
+    assert by_key['ftk_keyed_elsewhere']['errors']
+
+
+def test_an_all_nan_output_reports_no_warmup_at_all(client, synthetic_bars, tmp_path, monkeypatch):
+    """`valid_from: null` is what the "needs more bars" banner keys off; with
+    a number there instead, the UI would draw an empty pane and say nothing."""
+    _write_indicator(tmp_path, monkeypatch, 'ftk_allnan', (
+        'import numpy as np\n'
+        'from indicators.base import Indicator, Output\n'
+        'class FtkAllnan(Indicator):\n'
+        '    outputs = (Output("x"),)\n'
+        '    def compute(self, ctx, sym):\n'
+        '        return {"x": np.full(len(ctx), np.nan)}\n'
+    ))
+    resp = client.get('/api/products/SA/indicators/ftk_allnan')
+    assert resp.status_code == 200, resp.text
+    series = resp.json()['outputs']['x']
+    assert series['valid_from'] is None
+    assert set(series['values']) == {None}

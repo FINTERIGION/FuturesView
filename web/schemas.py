@@ -12,9 +12,10 @@ of a traceback three calls deep in the engine.
 
 from __future__ import annotations
 
+import datetime
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ProductIn(BaseModel):
@@ -73,10 +74,36 @@ _SLIPPAGE = Field(default=0.0, ge=0, description='Per-fill slippage; a cost, so 
 
 
 class BacktestRequest(BaseModel):
+    """Everything checked here is something the run could only fail on --
+    or, worse, finish on -- after it had already been queued: a bad date
+    string raised inside the job, a reversed window came back as "filtered
+    data is empty", and zero cash ran to a "blown up" result on bar 0 that
+    reads like a strategy failure. As a 422 each is refused before a run row
+    or a job exists.
+    """
+
     strategy: str
     symbols: List[str]
     start: str
     end: str
-    cash: float = 100_000.0
+    cash: float = Field(
+        default=100_000.0, gt=0, allow_inf_nan=False,
+        description='Initial cash; an account that starts with nothing has nothing to test.',
+    )
     slippage: float = _SLIPPAGE
     params: Dict[str, object] = Field(default_factory=dict)
+
+    @field_validator('start', 'end')
+    @classmethod
+    def _iso_date(cls, value: str) -> str:
+        # Normalized, so run history stores one spelling of each date.
+        try:
+            return datetime.date.fromisoformat(value.strip()).isoformat()
+        except ValueError:
+            raise ValueError(f'expected a date as YYYY-MM-DD, got {value!r}') from None
+
+    @model_validator(mode='after')
+    def _window_in_order(self):
+        if self.start > self.end:
+            raise ValueError(f'start {self.start} is after end {self.end}')
+        return self

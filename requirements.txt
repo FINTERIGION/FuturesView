@@ -1,8 +1,8 @@
 # Runtime deps for the CLI runners, pinned to match pyproject.toml.
 #
-# Not the full test environment: the web panel (fastapi, uvicorn, httpx) and
-# pytest are extras in pyproject.toml, and CI installs `.[test,web]` rather
-# than this file. Add web deps there, not here, or there will be two pin sets
+# Not the full test environment: the web panel (fastapi, uvicorn, httpx),
+# pytest and ruff are extras in pyproject.toml, and CI installs
+# `.[test,web,lint]` rather than this file. Add web deps there, not here, or there will be two pin sets
 # to keep in step. `pytest` was listed below in spite of that paragraph, which
 # is the one dependency this file said twice -- run `pip install -e ".[test]"`
 # for it, the same way CI does.

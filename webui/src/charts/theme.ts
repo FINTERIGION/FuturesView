@@ -43,7 +43,7 @@ export function baseOption(dark: boolean): EChartsOption {
 // belong to any single arm of it. Fighting that union for an internal
 // chart-building helper isn't worth it -- the public builder functions in
 // builders.ts are still typed to return `EChartsOption`, which is what
-// callers (EChart, pages) actually consume.
+// callers (EChart and the chart components) actually consume.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function valueAxis(dark: boolean, overrides: any = {}) {
   const { ink } = chartTokens(dark)

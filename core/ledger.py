@@ -2,8 +2,9 @@
 
 One row per *logical* trade: the fill that takes a product off flat through
 the fill that flattens it again, with every calendar roll in between folded
-into that same row (see docs/rewrite-plan.md, migrated from the old
-backtrader-analyzer ``TradeLogAnalyzer``).
+into that same row (migrated from the old backtrader-analyzer
+``TradeLogAnalyzer``; the columns are listed under Outputs in
+docs/backtest.md).
 
 Realized P&L comes straight from ``Fill.realized_pnl`` (computed by
 ``core.broker.Broker`` at fill time), not re-derived here -- that keeps the
@@ -42,6 +43,17 @@ class Ledger:
         self._next_id = 1
 
     # ------------------------------------------------------------------
+
+    def open_trade_id(self, symbol: str) -> Optional[int]:
+        """Id of ``symbol``'s logical trade still open, or None when flat.
+
+        Stable across a roll, which folds into the trade it carries, and new
+        after a flip or a close-and-reopen -- the same boundaries the trade
+        log draws, which is what lets the engine tie a protective level to
+        the one trade it was placed for.
+        """
+        row = self._open.get(symbol)
+        return row['id'] if row is not None else None
 
     def process_fill(self, fill: Fill) -> None:
         symbol = fill.symbol

@@ -1,9 +1,9 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { backtestApi, jobsApi, productsApi, runsApi, strategiesApi } from '../api/endpoints'
+import { backtestApi, dataApi, indicatorsApi, jobsApi, productsApi, runsApi, strategiesApi } from '../api/endpoints'
 import { MockEventSource } from '../test/setup'
-import { PRODUCTS, STRATEGIES, renderWorkspace, runDetail, runRow } from '../test/utils'
+import { INDICATORS, PRODUCTS, STRATEGIES, renderWorkspace, runDetail, runRow } from '../test/utils'
 import { ChartWorkspace } from './ChartWorkspace'
 
 vi.mock('../api/endpoints', () => ({
@@ -13,6 +13,7 @@ vi.mock('../api/endpoints', () => ({
   backtestApi: { start: vi.fn() },
   runsApi: { list: vi.fn(), get: vi.fn(), price: vi.fn(), remove: vi.fn() },
   jobsApi: { get: vi.fn(), cancel: vi.fn(), streamUrl: (id: string) => `/api/jobs/${id}/stream` },
+  indicatorsApi: { list: vi.fn(), get: vi.fn(), values: vi.fn(), reload: vi.fn() },
 }))
 
 // Canvas-backed and irrelevant to the logic under test.
@@ -20,6 +21,7 @@ vi.mock('../components/EChart', () => ({ EChart: () => <div data-testid="chart" 
 
 beforeEach(() => {
   vi.mocked(productsApi.list).mockResolvedValue(PRODUCTS)
+  vi.mocked(indicatorsApi.list).mockResolvedValue(INDICATORS)
   vi.mocked(productsApi.bars).mockResolvedValue({ symbol: 'SA', bars: [] })
   vi.mocked(productsApi.roll).mockResolvedValue({ symbol: 'SA', roll: [] })
   vi.mocked(strategiesApi.list).mockResolvedValue(STRATEGIES)
@@ -66,6 +68,44 @@ describe('opening a past run from the workspace history tab', () => {
     // The base series never depended on the run's price call -- it always
     // comes from /products/{code}/bars, so the chart is still on screen.
     expect(screen.getAllByTestId('chart').length).toBeGreaterThan(0)
+  })
+})
+
+describe('driving the workspace from the keyboard', () => {
+  it('focuses the product search on "/" and charts a filtered product on Enter, without the mouse', async () => {
+    // The sidebar is a sibling subtree of whatever holds focus when the key is
+    // pressed, so this exercises the one part that cannot be unit-tested in
+    // isolation: the shortcut reaching an input it does not own.
+    const user = userEvent.setup()
+    renderWorkspace(<ChartWorkspace />, { path: '/?symbol=SA' })
+    const list = await screen.findByRole('listbox')
+    await findProductRow(list, 'CF')
+
+    await user.keyboard('/')
+    const search = screen.getByPlaceholderText('Search products…')
+    await waitFor(() => expect(search).toHaveFocus())
+
+    // `/` opened the box rather than being typed into it.
+    expect(search).toHaveValue('')
+
+    await user.keyboard('CF{Enter}')
+
+    await waitFor(() => {
+      const charted = document.querySelector('.product-row.is-charted .code')
+      expect(charted?.textContent).toBe('CF')
+    })
+  })
+
+  it('collapses and reopens the product sidebar on Ctrl+B', async () => {
+    const user = userEvent.setup()
+    renderWorkspace(<ChartWorkspace />, { path: '/?symbol=SA' })
+    await screen.findByRole('listbox')
+
+    await user.keyboard('{Control>}b{/Control}')
+    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull())
+
+    await user.keyboard('{Control>}b{/Control}')
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeInTheDocument())
   })
 })
 
@@ -177,5 +217,66 @@ describe('exiting a finished backtest', () => {
 
     expect(cfRow.className).toContain('is-charted')
     expect(screen.queryByRole('button', { name: 'Exit backtest' })).not.toBeInTheDocument()
+  })
+})
+
+describe('a finished data update', () => {
+  it('refetches indicator values along with the bars they are computed from', async () => {
+    // The regression: only the bars were invalidated, so the candles gained
+    // the new days while every indicator stopped short of them for the rest
+    // of its staleTime.
+    localStorage.setItem('ft.indicators', JSON.stringify(['rsi']))
+    vi.mocked(indicatorsApi.values).mockResolvedValue({
+      symbol: 'SA',
+      indicator: 'rsi',
+      params: { period: 14 },
+      dates: [],
+      outputs: { rsi: { values: [], valid_from: null } },
+    })
+    vi.mocked(dataApi.update).mockResolvedValue({ job_id: 'd1' })
+    vi.mocked(jobsApi.get).mockResolvedValue({
+      id: 'd1', kind: 'data_update', status: 'done', progress: 1, message: 'Done', error: null,
+      created_at: 0, started_at: 0, finished_at: 0, cancel_requested: false, result: {},
+    })
+
+    const user = userEvent.setup()
+    renderWorkspace(<ChartWorkspace />, { path: '/?symbol=SA' })
+    await waitFor(() => expect(indicatorsApi.values).toHaveBeenCalledTimes(1))
+
+    await user.click(await screen.findByRole('button', { name: 'Update All' }))
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    MockEventSource.instances[0].emit({ type: 'state', status: 'done', progress: 1, message: 'Done' })
+
+    await waitFor(() => expect(indicatorsApi.values).toHaveBeenCalledTimes(2))
+  })
+
+  it('refetches after an update that failed partway, without calling it finished', async () => {
+    // The products before the failing one were already rewritten, so their
+    // chart data is stale all the same -- only `done` used to invalidate it.
+    localStorage.setItem('ft.indicators', JSON.stringify(['rsi']))
+    vi.mocked(indicatorsApi.values).mockClear()
+    vi.mocked(indicatorsApi.values).mockResolvedValue({
+      symbol: 'SA',
+      indicator: 'rsi',
+      params: { period: 14 },
+      dates: [],
+      outputs: { rsi: { values: [], valid_from: null } },
+    })
+    vi.mocked(dataApi.update).mockResolvedValue({ job_id: 'd2' })
+    vi.mocked(jobsApi.get).mockResolvedValue({
+      id: 'd2', kind: 'data_update', status: 'error', progress: 0.5, message: '', error: 'exchange said no',
+      created_at: 0, started_at: 0, finished_at: 0, cancel_requested: false, result: null,
+    })
+
+    const user = userEvent.setup()
+    renderWorkspace(<ChartWorkspace />, { path: '/?symbol=SA' })
+    await waitFor(() => expect(indicatorsApi.values).toHaveBeenCalledTimes(1))
+
+    await user.click(await screen.findByRole('button', { name: 'Update All' }))
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    MockEventSource.instances[0].emit({ type: 'state', status: 'error', progress: 0.5, message: '', error: 'exchange said no' })
+
+    await waitFor(() => expect(indicatorsApi.values).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText('Data update finished')).not.toBeInTheDocument()
   })
 })

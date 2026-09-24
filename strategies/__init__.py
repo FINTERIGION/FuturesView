@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import importlib
 import inspect
-import pkgutil
-import re
+import logging
+
+from core.registry import discover_subclasses, snake_name
 
 from .base import BarContext, SetupContext, Strategy
 from .cross_sectional_momentum import CrossSectionalMomentumStrategy
@@ -24,43 +25,48 @@ __all__ = [
     'discover_strategies', 'load_strategy', 'load_registered_strategy', 'name_for',
 ]
 
-_CAMEL_RE = re.compile(r'(?<!^)(?=[A-Z])')
-
+logger = logging.getLogger(__name__)
 
 def name_for(cls: type) -> str:
     """``DoubleMaStrategy`` -> ``'double_ma'``: snake_case the class name,
     then drop a redundant trailing ``_strategy`` -- unless doing so would
     leave a single, uninformative word (``MyStrategy`` -> ``'my_strategy'``,
     not ``'my'``). Matches the CLI names already documented in README.md."""
-    snake = _CAMEL_RE.sub('_', cls.__name__).lower()
-    if snake.endswith('_strategy'):
-        stem = snake[: -len('_strategy')]
-        if '_' in stem:
-            return stem
-    return snake
+    return snake_name(cls, 'strategy')
 
 
-def discover_strategies() -> dict:
+def discover_strategies(errors: dict | None = None) -> dict:
     """Scan every module in this package and return ``{short_name: cls}`` for
     every concrete ``Strategy`` subclass found (``Strategy`` itself excluded).
 
     A strategy is included regardless of which module defines it, so long as
     it lives somewhere under ``strategies/`` -- private, gitignored modules
     are discovered the same as the bundled examples.
+
+    By default a module that fails to import raises rather than being
+    skipped, and so do two classes sharing a short name: a silent skip would
+    report a syntax error as "unknown strategy" -- or, for a clash, run
+    whichever class happened to be scanned last.
+
+    Pass ``errors`` to degrade instead: each failure is logged, recorded as
+    ``{module_name: message}``, and the scan goes on without it -- clashing
+    classes are left out on both sides, never resolved by scan order. That is
+    for callers that can put the failure in front of the user themselves:
+    the panel's catalog, where one private module saved mid-edit should cost
+    one entry rather than the whole dropdown, and
+    :func:`load_registered_strategy`, which names the failures when the
+    strategy asked for is not found. Same shape as
+    ``indicators.discover_indicators``.
     """
-    found: dict = {}
-    package = importlib.import_module(__name__)
-    for _finder, mod_name, _is_pkg in pkgutil.iter_modules(package.__path__, prefix=f'{__name__}.'):
-        module = importlib.import_module(mod_name)
-        for _attr_name, obj in inspect.getmembers(module, inspect.isclass):
-            if obj is Strategy:
-                continue
-            if not issubclass(obj, Strategy):
-                continue
-            if obj.__module__ != module.__name__:
-                continue  # re-exported import, not defined here
-            found[name_for(obj)] = obj
-    return found
+    if errors is None:
+        return discover_subclasses(__name__, Strategy, 'strategy')
+
+    def record(mod_name: str, exc: Exception) -> None:
+        message = f'{type(exc).__name__}: {exc}'
+        logger.warning('strategies: %s -- %s', mod_name, message)
+        errors[mod_name] = f'{errors[mod_name]}\n{message}' if mod_name in errors else message
+
+    return discover_subclasses(__name__, Strategy, 'strategy', on_error=record)
 
 
 def load_registered_strategy(name: str) -> type:
@@ -80,14 +86,26 @@ def load_registered_strategy(name: str) -> type:
     Raises ``KeyError`` for an unknown name -- the only failure mode, which
     is what lets the routers map it to one clean 4xx instead of letting an
     import error surface as a 500.
+
+    A module elsewhere under ``strategies/`` that fails to import does not
+    stop a healthy strategy from loading. It used to: one private file saved
+    mid-edit made every backtest fail, through the CLI and the panel alike,
+    whichever strategy was asked for. When ``name`` is not found, the
+    ``KeyError`` names every module that failed, so a strategy whose own file
+    is broken is reported with its error rather than as merely unknown.
     """
-    registry = discover_strategies()
-    try:
+    failed: dict = {}
+    registry = discover_strategies(errors=failed)
+    if name in registry:
         return registry[name]
-    except KeyError:
-        raise KeyError(
-            f"Unknown strategy {name!r}. Available: {', '.join(sorted(registry))}"
-        ) from None
+    message = f"Unknown strategy {name!r}. Available: {', '.join(sorted(registry))}"
+    if failed:
+        # One line: the routers put `str(KeyError)` -- its repr -- in the
+        # response, where a newline would arrive as a literal backslash-n.
+        message += '. Failed to load: ' + '; '.join(
+            f"{mod} ({msg.replace(chr(10), '; ')})" for mod, msg in sorted(failed.items())
+        )
+    raise KeyError(message)
 
 
 def load_strategy(spec: str) -> type:

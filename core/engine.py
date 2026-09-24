@@ -1,6 +1,6 @@
 """Four-phase day loop: OPEN -> INTRABAR -> SIGNAL -> SETTLE.
 
-See docs/rewrite-plan.md §2. Order routing is contract-agnostic at the point
+See Execution model in docs/backtest.md. Order routing is contract-agnostic at the point
 a strategy calls ``ctx.set_target`` / ``ctx.buy`` / ``ctx.sell`` -- the
 engine only resolves *which* calendar contract an order lands on at the
 moment it actually fills (``MarketData.contract_by_bar``), so there is no
@@ -72,18 +72,22 @@ class Engine:
         self.deferred: Dict[str, int] = {}      # accumulated while dark, replays once live
         self.queued: Dict[str, int] = {}        # this bar's SIGNAL-phase order deltas
         # Two protective legs of one bracket. The ``*_spec`` half is the rule
-        # and is sticky -- it survives a dark bar and re-arms after a close and
-        # reopen -- while the ``live_*`` half is the order actually resting on
-        # a contract right now. A resting order carries the ``anchor`` it was
-        # resolved from (see ``_bracket_anchor``), and ``_arm_brackets``
-        # re-resolves it whenever that anchor moves, so the level always
-        # reflects the current rule and the current position rather than
-        # whichever of the two happened to come first. Either leg filling
-        # cancels both (OCO), in ``_intrabar_phase``.
-        self.stop_spec: Dict[str, dict] = {}    # {'distance': x} or {'price': x}, sticky
+        # -- it survives a dark bar, and a ``distance`` rule re-arms after a
+        # close and reopen -- while the ``live_*`` half is the order actually
+        # resting on a contract right now. A resting order carries the
+        # ``anchor`` it was resolved from (see ``_bracket_anchor``), and
+        # ``_arm_brackets`` re-resolves it whenever that anchor moves, so the
+        # level always reflects the current rule and the current position
+        # rather than whichever of the two happened to come first. Either leg
+        # filling cancels both (OCO), in ``_intrabar_phase``.
+        self.stop_spec: Dict[str, dict] = {}    # {'distance': x} or {'price': x}
         self.live_stop: Dict[str, dict] = {}    # {'price','contract','anchor'} currently resting
         self.tp_spec: Dict[str, dict] = {}      # take-profit, same shape as stop_spec
         self.live_tp: Dict[str, dict] = {}
+        # ``(spec, trade_id)`` for each ``price`` rule, recorded the first time
+        # it arms: the trade that level was named for. See ``_price_level_spent``.
+        self.stop_owner: Dict[str, tuple] = {}
+        self.tp_owner: Dict[str, tuple] = {}
 
         self.indicators: Dict[tuple, "object"] = {}
         # Warmup is tracked per product, not once for the whole universe: a
@@ -366,9 +370,9 @@ class Engine:
         An explicit ``price`` has no such anchor: it is a level the strategy
         named while the old contract was the market. It is shifted by the
         basis the roll just realized, which keeps the level the same distance
-        from the market as the strategy chose. The sticky spec is shifted too,
-        not just the resting order, so a position that later closes and
-        reopens does not re-arm on the stale scale.
+        from the market as the strategy chose. The spec is shifted, not just
+        the resting order, because the resting order is dropped here and
+        ``_arm_brackets`` re-arms it from the spec.
         """
         for spec_by_sym, live in ((self.stop_spec, self.live_stop),
                                   (self.tp_spec, self.live_tp)):
@@ -479,13 +483,40 @@ class Engine:
             price = avg_entry + offset if net > 0 else avg_entry - offset
         live[sym] = {'price': float(price), 'contract': contract, 'anchor': anchor}
 
+    @staticmethod
+    def _price_level_spent(sym: str, spec: dict, owner: Dict[str, tuple], trade) -> bool:
+        """Whether ``spec`` is a ``price`` level named for a trade that is over.
+
+        A ``distance`` is relative to whatever position holds it, so it carries
+        from one trade to the next. A ``price`` is one absolute level, placed on
+        one side of one position's market. Carried past that trade it lands on
+        the wrong side of the next: a long's stop below the market becomes a
+        short's stop below the market, which ``_bracket_hit``'s gap tier fills
+        at the very next open -- the new position closed on its first bar by a
+        rule nobody set for it. The same goes for a reopen on the same side at
+        a price the old level is now above.
+
+        So a price rule belongs to the trade it first arms on, recorded here as
+        ``(spec, trade_id)``. A rule set while flat has not armed yet and waits
+        for the entry it was set for, deferred or not. A fresh ``set_stop`` is
+        a new dict, so it is never mistaken for the one already bound.
+        """
+        if 'price' not in spec:
+            return False
+        bound = owner.get(sym)
+        if bound is None or bound[0] is not spec:
+            owner[sym] = (spec, trade)
+            return False
+        return bound[1] != trade
+
     def _arm_brackets(self, i: int, date: Date) -> None:
         """Arm stop and take-profit at the end of OPEN, against today's fill.
 
         Each leg is re-resolved whenever what it was resolved *from* has moved
         -- the position's cost, its side, or the contract it sits on -- and
         left alone otherwise. ``*_spec`` is the source of truth; a spec that
-        has gone away takes its resting order with it.
+        has gone away takes its resting order with it, and a ``price`` spec
+        goes away with the trade it was armed on (see ``_price_level_spent``).
         """
         for sym in self.symbols:
             net = self.broker.net_position(sym)
@@ -493,15 +524,29 @@ class Engine:
                 # stale orders from a position that's since closed
                 self.live_stop.pop(sym, None)
                 self.live_tp.pop(sym, None)
+                # ...and any price level that position armed. Only a spec
+                # already bound to a trade is dropped; one set while flat is
+                # still waiting for its entry.
+                for spec_by_sym, owner in ((self.stop_spec, self.stop_owner),
+                                           (self.tp_spec, self.tp_owner)):
+                    spec = spec_by_sym.get(sym)
+                    if spec is not None and (owner.get(sym) or (None,))[0] is spec:
+                        del spec_by_sym[sym]
+                        del owner[sym]
                 continue
             contract = self._current_contract(sym)
             if contract is None:
                 continue
-            for spec_by_sym, live, sign in (
-                (self.stop_spec, self.live_stop, -1),
-                (self.tp_spec, self.live_tp, +1),
+            trade = self.ledger.open_trade_id(sym)
+            for spec_by_sym, live, owner, sign in (
+                (self.stop_spec, self.live_stop, self.stop_owner, -1),
+                (self.tp_spec, self.live_tp, self.tp_owner, +1),
             ):
                 spec = spec_by_sym.get(sym)
+                if spec and self._price_level_spent(sym, spec, owner, trade):
+                    del spec_by_sym[sym]
+                    del owner[sym]
+                    spec = None
                 if not spec:
                     live.pop(sym, None)
                     continue
@@ -612,8 +657,10 @@ class Engine:
             # OCO: one leg filling flattens the position, so the other is void.
             self.live_stop.pop(sym, None)
             self.stop_spec.pop(sym, None)
+            self.stop_owner.pop(sym, None)
             self.live_tp.pop(sym, None)
             self.tp_spec.pop(sym, None)
+            self.tp_owner.pop(sym, None)
 
     # ------------------------------------------------------------------
     # SIGNAL phase

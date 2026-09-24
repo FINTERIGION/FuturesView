@@ -19,13 +19,33 @@ npm run build         # writes to ../web/static
 
 Two checks stop a web page you have open from driving the API through your browser. Every request must carry a Host header naming the panel (`FT_WEB_ALLOWED_HOSTS` widens the list), and every write (POST/PUT/PATCH/DELETE) that carries an `Origin` must come from the panel's own address or the Vite dev server, or it is refused with 403. Behind a reverse proxy that rewrites the Host header, list the public origin in `FT_WEB_ALLOWED_ORIGINS`, e.g. `https://panel.example`.
 
-## Pages
+## What it does
 
-| Page | What it does |
+| Where | What it does |
 | --- | --- |
-| Products | Add / edit / delete registered products; per-product candlestick chart with a roll-contract overlay |
-| Data | Coverage table (rows, date range, staleness) and a job to download/rebuild per product |
-| Backtest | Run any discovered strategy over a date range; equity curve, drawdown, price & signals, trade log, per-symbol and per-exit-reason breakdowns |
+| Product sidebar | Every registered product with its data coverage, a per-product download and edit, and Update All. Adding or editing a product opens a drawer with the registry form and a candlestick chart with a roll-contract overlay |
+| Main chart | The charted product's OI-weighted daily candles and roll points, the indicators ticked in the picker, and the fills and window of the run currently opened |
+| Backtest tab | Run any discovered strategy over the sidebar's universe and a date range; metric tiles, equity curve, trade log, per-symbol and per-exit-reason breakdowns. A run always uses the strategy's declared default params — override them from the CLI with `--param` |
+| History tab | Past runs: open one to overlay it on the chart and refill the backtest form, or delete it |
+| Indicators | The chart toolbar's picker lists every class under `indicators/`; ticking one overlays it on the price pane or gives it a sub-pane, per the class's own declaration. A thin rule splits the picker the way the chart is split — price-pane entries above it, own-pane entries below — and the built-in volume pane is the first of the latter, drawn from the bars the chart already has rather than from a class. See [Writing an Indicator](indicator.md) |
+
+## Getting around
+
+The panel is one screen, not a set of routed pages: a chart filling the width,
+a product sidebar down the right, and a tabbed drawer along the bottom. Both
+side panels collapse, and the drawer's top edge is draggable (or resizable with
+the arrow keys once its handle has focus).
+
+| | |
+| --- | --- |
+| Product row | Click toggles it into the backtest universe (the tick box at the head of the row); double-click charts it. The charted product is always in the universe, so its box is drawn ticked and dimmed. The dot on the right is coverage — filled green fresh, amber stale, hollow never downloaded — and hovering the row reveals per-product download and edit buttons |
+| Search | `/` jumps to it from anywhere; ↑/↓ move a highlight through the matches and Enter charts the highlighted one. Escape clears the filter, then gives the keyboard back to the chart |
+| Theme | Light, dark, or follow the OS — the switch in the top bar. The choice is remembered per browser, and the charts follow it, since their colours are baked into the canvas rather than read from CSS |
+| Shortcuts | `Ctrl/⌘+B` sidebar, `Ctrl/⌘+J` bottom drawer, `Ctrl/⌘+Enter` run the backtest, `?` for the full list |
+
+A job's progress also rides in the top bar while it runs, and a finished run or
+data update raises a toast — either can finish while the panel that started it
+is collapsed or behind another tab.
 
 ## Architecture
 
@@ -35,20 +55,37 @@ web/                      FastAPI backend
   config.py                 Paths, host/port defaults
   jobs.py                   Background job manager (thread pool + SSE)
   marketcache.py            LRU over research.runner_api.load_market
+  barscache.py              LRU over DataManager.load_dataframe (chart + indicator reads)
   store.py                  SQLite run-history index (results/webpanel.db)
   serialize.py              JSON-safe conversion (inf/NaN/date/numpy)
   schemas.py                Pydantic request models
-  routers/                  products, data, strategies, backtest, runs, jobs
+  routers/                  products, data, strategies, indicators, backtest, runs, jobs
 
 webui/                    Vite + React + TypeScript frontend
   src/api/                   Typed fetch client + endpoint functions
-  src/charts/                ECharts option builders (candlestick, equity, drawdown, ...)
-  src/components/            Card, Table, Drawer, Tabs, EChart, ParamEditor, ...
-  src/pages/                 One file per page above
+  src/charts/                ECharts option builders (the main chart, candlestick, line)
+  src/chart/                 The main super chart, its toolbar and indicator picker
+  src/shell/                 Workspace shell: top bar, sidebar, bottom drawer, shortcuts
+  src/panels/                What the bottom drawer's tabs hold (backtest form, results, history)
+  src/components/            Card, Table, Drawer, Tabs, EChart, JobProgress, Toast, Icon, ...
+  src/theme/                 Light/dark mode + the chart colour palette
+  src/index.css              Design tokens -- every colour, space and radius below it
   src/i18n/                  en / zh resource files
 ```
 
 The backend is a thin layer: every route calls the same functions the CLI calls (`run_single_backtest`, `DataManager`, `discover_strategies`).
+
+### Strategies
+
+`GET /api/strategies` lists every class under `strategies/`. A module that fails to import, or whose class shares a short name with another, stays in the list as an entry carrying `errors`, and the backtest form offers it disabled with the message. The rest of the list, and backtests of every other strategy, are unaffected.
+
+`POST /api/strategies/reload` re-imports every module under `strategies/` and reports the ones that failed in `failed`. It is refused with 409 while a job is running, checked while no new job can start.
+
+### Indicators
+
+`GET /api/products/{code}/indicators/{key}` computes a chart indicator standalone, over the same `DataManager` frame the candles come from — no backtest, no engine. Parameter overrides arrive as repeated `p=name=value`, the same token as the CLI's `--param`, and are bounded by the class's declared `space` before they reach TA-Lib.
+
+`POST /api/indicators/reload` re-imports every module under `indicators/`. Unlike `strategies/reload` it is *not* refused while a job runs: that 409 exists because a running backtest holds a `Strategy` class object, and nothing holds an `Indicator` across a request.
 
 ### Product registry
 

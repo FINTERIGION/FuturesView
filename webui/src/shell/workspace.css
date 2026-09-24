@@ -1,7 +1,10 @@
-/* The chart workspace shell: top bar, main chart, right product sidebar,
- * bottom drawer. Uses the existing custom-property tokens from index.css
- * (--bg, --surface, --border, --text, --radius, --shadow, ...) plus two
- * local ones set inline from React state: --sidebar-w, --drawer-h. */
+/* ============================================================================
+   The chart workspace shell: top bar, main chart, right product sidebar,
+   bottom drawer.
+
+   Tokens come from index.css; two more are set inline from React state --
+   --sidebar-w and --drawer-h -- because they are dragged/toggled at runtime.
+   ============================================================================ */
 
 .workspace-root {
   flex: 1 1 auto;
@@ -18,29 +21,131 @@
   grid-template-columns: 1fr var(--sidebar-w, 300px);
   grid-template-rows: 1fr var(--drawer-h, 360px);
   background: var(--bg);
+  /* Collapsing the sidebar or the drawer animates the grid track itself, so
+     the chart grows into the freed space instead of snapping. Suppressed
+     mid-drag (see .drawer-resizing) -- a transition on a value the pointer is
+     already driving lags behind the cursor. */
+  transition: grid-template-columns var(--dur-2) var(--ease),
+    grid-template-rows var(--dur-2) var(--ease);
 }
 
-/* ---------- Top bar ---------- */
+body.drawer-resizing .workspace {
+  transition: none;
+}
 
+/* ============================================================================
+   Top bar
+   ============================================================================ */
+
+.topbar {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  z-index: var(--z-sticky);
+}
+
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 48px;
+  padding: 0 var(--sp-3);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 650;
+  font-size: var(--fs-md);
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.brand-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  box-shadow: var(--shadow-sm);
+}
+
+.topbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 var(--sp-1);
+}
+
+/* The charted product, named in the one place that is always on screen. */
 .topbar-symbol {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  padding: 2px 10px;
-  border-radius: var(--radius);
+  gap: var(--sp-2);
+  padding: 3px var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
-  font-size: 13px;
+  font-size: var(--fs-sm);
+  max-width: 260px;
 }
 
 .topbar-symbol strong {
-  font-size: 14px;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .topbar-symbol-name {
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* ---------- Chart area ---------- */
+/* A job running somewhere off screen. The bar under the label carries the
+   progress, so the pill does not have to re-flow as the percentage climbs
+   through its digits. */
+.job-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 108px;
+  padding: 3px var(--sp-2) 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.job-pill-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.job-pill-pct {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.job-pill .progress-bar {
+  height: 3px;
+}
+
+/* ============================================================================
+   Chart area
+   ============================================================================ */
 
 .chart-area {
   grid-column: 1;
@@ -49,6 +154,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  background: var(--surface);
   border-right: 1px solid var(--border);
 }
 
@@ -56,21 +162,32 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .chart-symbol-title {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  font-size: 14px;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.chart-symbol-title strong {
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .chart-symbol-name {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .super-chart-canvas {
@@ -86,7 +203,121 @@
   pointer-events: none;
 }
 
-/* ---------- Product sidebar ---------- */
+/* Banners stacked over the chart (a run that misses this symbol, an indicator
+   that would not compute) share one gutter rather than each carrying its own
+   inline margin. */
+.chart-notices {
+  flex: 0 0 auto;
+  padding: var(--sp-2) var(--sp-3) 0;
+}
+
+.chart-notices .hint-banner {
+  margin-bottom: var(--sp-2);
+}
+
+/* ============================================================================
+   Indicator picker
+   ============================================================================ */
+
+.indicator-picker {
+  position: relative;
+}
+
+.indicator-menu {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  right: 0;
+  z-index: var(--z-pop);
+  min-width: 268px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: var(--sp-1);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  animation: pop-down var(--dur-2) var(--ease);
+}
+
+@keyframes pop-down {
+  from { transform: translateY(-4px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.indicator-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2) var(--sp-2);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* Splits the picker the way the chart is split: what draws over the candles
+   above, what takes a pane of its own below. */
+.indicator-menu-rule {
+  margin: var(--sp-1) var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+
+.indicator-menu-empty {
+  padding: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.indicator-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-md);
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease);
+}
+
+.indicator-row:hover {
+  background: var(--surface-2);
+}
+
+.indicator-row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.indicator-row-pane {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+
+/* A broken class stays listed, disabled, with its error on hover -- an
+   indicator that silently vanished mid-edit is the harder thing to debug. */
+.indicator-row.is-broken {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.indicator-row-error {
+  font-size: var(--fs-xs);
+  color: var(--danger);
+}
+
+/* ============================================================================
+   Product sidebar
+   ============================================================================ */
 
 .sidebar {
   grid-column: 2;
@@ -96,69 +327,194 @@
   flex-direction: column;
   background: var(--surface);
   border-left: 1px solid var(--border);
-  box-shadow: var(--shadow);
 }
 
 .sidebar-rail {
   grid-column: 2;
   grid-row: 1 / 3;
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 8px;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-top: var(--sp-2);
   background: var(--surface);
   border-left: 1px solid var(--border);
+}
+
+/* The collapsed rail still says how many products are in the universe -- the
+   number is the reason to open it again. */
+.sidebar-rail-count {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
 }
 
 .sidebar-header {
   flex: 0 0 auto;
   display: flex;
-  gap: 8px;
-  padding: 10px;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
   border-bottom: 1px solid var(--border);
 }
 
-.sidebar-search {
-  flex: 1;
+/* Search box: the magnifier sits inside the field, and a clear button
+   appears only once there is something to clear. */
+.search {
+  position: relative;
+  flex: 1 1 auto;
   min-width: 0;
-  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon {
+  position: absolute;
+  left: var(--sp-2);
+  display: flex;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.sidebar-search {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--h-md);
+  padding: 0 28px 0 28px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--text);
+  font-size: var(--fs-md);
+  transition: border-color var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease),
+    background var(--dur-1) var(--ease);
+}
+
+.sidebar-search::placeholder {
+  color: var(--text-faint);
+}
+
+.sidebar-search:focus {
+  outline: none;
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.search-clear {
+  position: absolute;
+  right: var(--sp-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.search-clear:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+/* A `/` hint parked in the empty field, so the shortcut is discoverable
+   without a manual. Hidden the moment the field has focus or content. */
+.search-hint {
+  position: absolute;
+  right: var(--sp-2);
+  pointer-events: none;
+}
+
+.sidebar-meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  background: var(--surface-2);
 }
 
 .sidebar-list {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  padding: var(--sp-1) 0;
 }
 
 .sidebar-footer {
   flex: 0 0 auto;
   border-top: 1px solid var(--border);
-  padding: 10px;
+  padding: var(--sp-2);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-2);
+  background: var(--surface);
 }
+
+/* ---------- One product row ---------- */
 
 .product-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
+  gap: var(--sp-2);
+  padding: 6px var(--sp-2) 6px var(--sp-1);
+  margin: 0 var(--sp-1);
+  border-radius: var(--radius-sm);
   border-left: 3px solid transparent;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--fs-md);
+  transition: background var(--dur-1) var(--ease);
 }
 
 .product-row:hover:not(.is-charted) {
   background: var(--surface-2);
 }
 
-.product-row.is-in-universe {
-  border-left-color: var(--border-strong);
+/* Membership of the backtest universe. A click anywhere on the row toggles
+   it, but the box is what says so -- the border alone left people guessing
+   what the row's two selections were. */
+.product-row .universe-box {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: transparent;
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+
+.product-row.is-in-universe .universe-box,
+.product-row.is-charted .universe-box {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* Where Enter would land while the search box has the keyboard. A ring, not
+   a fill: the row may also be charted or in the universe, and this must not
+   be mistaken for either. */
+.product-row.is-active {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* The charted row is in the universe structurally, not by choice, so its box
+   reads as fixed rather than ticked. */
+.product-row.is-charted .universe-box {
+  opacity: 0.55;
 }
 
 .product-row.is-charted {
@@ -167,8 +523,11 @@
 }
 
 .product-row .code {
-  font-weight: 600;
-  min-width: 32px;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+  letter-spacing: 0.02em;
+  min-width: 30px;
 }
 
 .product-row .name {
@@ -178,6 +537,23 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* Coverage, as a dot rather than a word: three states in a 240px row, read
+   at a glance down the column. The title attribute carries the detail. */
+.product-row .coverage-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.coverage-dot.is-fresh { background: var(--success); }
+.coverage-dot.is-stale { background: var(--warning); }
+.coverage-dot.is-empty {
+  background: transparent;
+  border: 1px solid var(--border-strong);
 }
 
 .product-row .row-actions {
@@ -185,14 +561,30 @@
   gap: 2px;
   opacity: 0;
   pointer-events: none;
+  transition: opacity var(--dur-1) var(--ease);
 }
 
-.product-row:hover .row-actions {
+.product-row:hover .row-actions,
+.product-row:focus-within .row-actions {
   opacity: 1;
   pointer-events: auto;
 }
 
-/* ---------- Bottom drawer ---------- */
+/* Loading placeholders, shaped like the rows they stand in for. */
+.product-row-skeleton {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 7px var(--sp-3);
+}
+
+.product-row-skeleton .skeleton {
+  height: 10px;
+}
+
+/* ============================================================================
+   Bottom drawer
+   ============================================================================ */
 
 .bdrawer {
   grid-column: 1;
@@ -207,14 +599,7 @@
 }
 
 .bdrawer-collapsed {
-  grid-column: 1;
-  grid-row: 2;
   height: 40px;
-  display: flex;
-  flex-direction: column;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  border-right: 1px solid var(--border);
 }
 
 .bdrawer-collapsed .bdrawer-tabbar {
@@ -223,19 +608,25 @@
 }
 
 .bdrawer-collapsed-label {
-  font-size: 13px;
+  font-size: var(--fs-md);
+  font-weight: 500;
   color: var(--text-muted);
 }
 
+/* The drag handle straddles the drawer's top edge. Invisible until pointed
+   at or focused, so it does not draw a second border under the chart. */
 .bdrawer-handle {
   position: absolute;
   top: -4px;
   left: 0;
   right: 0;
-  height: 8px;
+  height: 9px;
   cursor: row-resize;
   touch-action: none;
   z-index: 1;
+  border: none;
+  padding: 0;
+  background: transparent;
 }
 
 .bdrawer-handle::after {
@@ -243,35 +634,41 @@
   position: absolute;
   left: 50%;
   top: 3px;
-  width: 40px;
+  width: 44px;
   height: 3px;
   transform: translateX(-50%);
-  border-radius: 2px;
+  border-radius: var(--radius-pill);
   background: var(--border-strong);
+  opacity: 0;
+  transition: opacity var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+
+.bdrawer-handle:hover::after,
+.bdrawer-handle:focus-visible::after,
+body.drawer-resizing .bdrawer-handle::after {
+  opacity: 1;
+  background: var(--accent);
+}
+
+.bdrawer-handle:focus-visible {
+  box-shadow: none;
 }
 
 .bdrawer-tabbar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  padding: 6px 12px 0;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-2);
   border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
 }
 
-.bdrawer-toggle {
-  font-size: 16px;
-  line-height: 1;
-  transition: transform 0.18s ease;
+.bdrawer-toggle svg {
+  transition: transform var(--dur-2) var(--ease);
 }
 
-.add-product-btn {
-  font-size: 18px;
-  font-weight: 600;
-  line-height: 1;
-  padding-block: 2px;
-}
-
-.bdrawer-toggle.is-collapsed {
+.bdrawer-toggle.is-collapsed svg {
   transform: rotate(180deg);
 }
 
@@ -279,19 +676,27 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 14px;
+  padding: var(--sp-3);
 }
+
+/* ---------- Drawer contents ---------- */
 
 .panel-split {
   display: grid;
-  grid-template-columns: minmax(240px, 300px) 1fr;
-  gap: 16px;
+  grid-template-columns: minmax(250px, 300px) 1fr;
+  gap: var(--sp-4);
   align-items: start;
   min-height: 100%;
 }
 
+/* The run form reads as a panel of its own against the results beside it --
+   without the surface, the two columns ran together into one grey field. */
 .panel-rail {
   min-width: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
 }
 
 .panel-main {
@@ -299,7 +704,36 @@
   min-height: 0;
 }
 
-/* ---------- Narrow screens ---------- */
+/* ============================================================================
+   Keyboard shortcut sheet
+   ============================================================================ */
+
+.shortcut-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  font-size: var(--fs-md);
+  color: var(--text-muted);
+}
+
+.shortcut-keys {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: 0 0 auto;
+}
+
+/* ============================================================================
+   Narrow screens
+   ============================================================================ */
 
 @media (max-width: 900px) {
   .workspace {
@@ -312,32 +746,36 @@
    * in. */
   .sidebar {
     position: fixed;
-    top: 44px;
+    top: 48px;
     right: 0;
     bottom: 0;
-    width: min(300px, 80vw);
+    width: min(320px, 86vw);
     grid-column: unset;
     grid-row: unset;
-    z-index: 30;
+    z-index: var(--z-pop);
+    box-shadow: var(--shadow-lg);
   }
 
   .sidebar-rail {
     position: fixed;
-    top: 44px;
+    top: 48px;
     right: 0;
     bottom: 0;
     grid-column: unset;
     grid-row: unset;
-    z-index: 30;
+    z-index: var(--z-pop);
   }
 
   .chart-area,
-  .bdrawer,
-  .bdrawer-collapsed {
+  .bdrawer {
     grid-column: 1;
   }
 
   .panel-split {
     grid-template-columns: 1fr;
+  }
+
+  .topbar-symbol {
+    max-width: 150px;
   }
 }

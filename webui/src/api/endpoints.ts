@@ -3,6 +3,8 @@ import type {
   Bar,
   Coverage,
   ExchangeMeta,
+  IndicatorInfo,
+  IndicatorValues,
   JobState,
   Product,
   ProductInput,
@@ -55,7 +57,29 @@ export const dataApi = {
 export const strategiesApi = {
   list: () => api.get<StrategyInfo[]>('/strategies'),
   get: (key: string) => api.get<StrategyInfo>(`/strategies/${seg(key)}`),
-  reload: () => api.post<{ reloaded: boolean; strategies: string[] }>('/strategies/reload'),
+  reload: () =>
+    api.post<{ reloaded: boolean; strategies: string[]; failed: Record<string, string> }>('/strategies/reload'),
+}
+
+export const indicatorsApi = {
+  list: () => api.get<IndicatorInfo[]>('/indicators'),
+  get: (key: string) => api.get<IndicatorInfo>(`/indicators/${seg(key)}`),
+  /** `params` is accepted today and sent as the same `p=name=value` token the
+   * CLI's `--param` uses, even though nothing in the UI overrides an
+   * indicator's defaults yet -- so wiring up a param editor later is a change
+   * to one component, not to this contract. */
+  values: (code: string, key: string, params?: Record<string, unknown>, start?: string, end?: string) => {
+    const q = new URLSearchParams()
+    if (start) q.set('start', start)
+    if (end) q.set('end', end)
+    for (const [name, value] of Object.entries(params ?? {})) q.append('p', `${name}=${value}`)
+    const qs = q.toString()
+    return api.get<IndicatorValues>(`/products/${seg(code)}/indicators/${seg(key)}${qs ? `?${qs}` : ''}`)
+  },
+  reload: () =>
+    api.post<{ reloaded: boolean; indicators: string[]; failed: Record<string, string> }>(
+      '/indicators/reload',
+    ),
 }
 
 export interface BacktestParams {
@@ -65,7 +89,10 @@ export interface BacktestParams {
   end: string
   cash: number
   slippage: number
-  params: Record<string, unknown>
+  /** Strategy-parameter overrides. The web UI never sends any -- the backtest
+   * form edits the run's own settings only -- so the engine falls back to the
+   * strategy's declared defaults (web/schemas.py defaults this to `{}`). */
+  params?: Record<string, unknown>
 }
 
 export const backtestApi = {

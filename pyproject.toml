@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest==9.1.1"]
+lint = ["ruff==0.16.8"]
 web = [
     "fastapi==0.121.3",
     "uvicorn[standard]==0.41.0",
@@ -31,7 +32,7 @@ web = [
 # non-package top-level directories (tests, webui, docs, data, cache, results)
 # out, which is what the explicit list was buying.
 [tool.setuptools.packages.find]
-include = ["core*", "datafeed*", "strategies*", "research*", "web*"]
+include = ["core*", "datafeed*", "strategies*", "indicators*", "research*", "web*"]
 
 # The product registry is data, not code, so nothing sweeps it into the wheel on
 # its own. `datafeed.products` reads it at *import* time, so a wheel without it
@@ -43,3 +44,12 @@ datafeed = ["products.json"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+# Correctness, not style: pyflakes (F), syntax errors (E9) and bugbear (B).
+# Run `ruff check .` locally; CI runs the same.
+[tool.ruff.lint]
+select = ["F", "E9", "B"]
+ignore = [
+    "B008",  # `Query(...)` as a default is how FastAPI declares a query param
+    "B905",  # zip() without strict=: the zipped sequences are built aligned
+]

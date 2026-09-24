@@ -103,6 +103,69 @@ export interface StrategyInfo {
   fixed_params: string[]
   space: Record<string, SpaceSpec>
   space_error: string | null
+  /** Why this entry cannot run: its module failed to import, its class
+   * clashed with another's short name, or a declaration could not be read.
+   * Non-empty means the form offers it disabled, with these messages. */
+  errors: string[]
+}
+
+// -------------------------------------------------------------------------
+
+/** How one of an indicator's series should be drawn.
+ *
+ * `color` is the author's *declaration*, not a resolved colour: a number is a
+ * slot in the categorical palette, a bare word is a semantic token, a `#hex`
+ * is a literal, and a pair is the `>= 0` / `< 0` colours of a sign-coloured
+ * bar. `resolveColor` (charts/indicatorColor.ts) turns it into a hex against
+ * the live theme -- the panel flips light/dark with no refetch, so a colour
+ * resolved server-side would be stale the moment the user toggled it. */
+export interface IndicatorOutput {
+  key: string
+  label: string
+  kind: 'line' | 'bar' | 'area'
+  color: number | string | [number | string, number | string] | null
+  style: 'solid' | 'dashed' | 'dotted'
+}
+
+export interface IndicatorInfo {
+  key: string
+  label: string
+  class_name: string
+  module: string
+  file: string
+  docstring: string
+  /** `'main'` draws over the candles; `'sub'` gets its own stacked pane. */
+  pane: 'main' | 'sub'
+  precision: number
+  /** Sub-pane y-axis bounds; `null` autoscales. Either end may be `null`. */
+  value_range: { min: number | null; max: number | null } | null
+  guides: number[]
+  outputs: IndicatorOutput[]
+  params: Record<string, unknown>
+  fixed_params: string[]
+  space: Record<string, SpaceSpec>
+  space_error: string | null
+  /** Problems with the class's declaration, or the import error for a module
+   * that would not load. A non-empty list means the picker shows it disabled
+   * rather than dropping it silently. */
+  errors: string[]
+}
+
+export interface IndicatorSeries {
+  values: (number | null)[]
+  /** Index of the first non-null value -- the end of the warmup. `null` when
+   * the whole series is null, i.e. the window is longer than the loaded
+   * range, which the UI reports rather than drawing an empty pane. */
+  valid_from: number | null
+}
+
+export interface IndicatorValues {
+  symbol: string
+  indicator: string
+  params: Record<string, unknown>
+  /** Values carry their own dates so the chart aligns by date, not position. */
+  dates: string[]
+  outputs: Record<string, IndicatorSeries>
 }
 
 // -------------------------------------------------------------------------

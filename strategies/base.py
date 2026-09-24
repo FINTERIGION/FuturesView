@@ -1,6 +1,6 @@
 """Strategy API: lifecycle base class plus the two context objects.
 
-See docs/rewrite-plan.md §4. Signals are computed from each product's
+See docs/strategy.md. Signals are computed from each product's
 OI-weighted continuous series (``SetupContext``/``BarContext`` accessors);
 fills happen on that day's calendar contract, resolved by the engine only at
 fill time -- strategy code never has to think about which physical contract
@@ -34,8 +34,7 @@ class Strategy:
     ``space`` optionally declares the range each param is plausible over:
     ``{param_name: Int(...) | Float(...) | Categorical(...)}``. Nothing
     searches it -- ``ft.py validate`` steps one notch either side of the value
-    in use to see whether the result depends on the exact number, and the web
-    panel's parameter editor flags a value typed outside the bounds. Params
+    in use to see whether the result depends on the exact number. Params
     not listed in ``space`` and not in ``fixed_params`` get a heuristic range
     inferred from their default value (see ``research.space.resolve_space``).
     ``fixed_params`` lists params that should never be perturbed (position
@@ -260,6 +259,10 @@ class BarContext:
     # The two form an OCO pair -- whichever trips first flattens the position
     # and cancels the other. A bar that touches both is resolved by
     # ``Engine._bracket_hit``, which prefers the stop.
+    #
+    # A ``distance`` rule carries into the next trade; a ``price`` rule is
+    # dropped with the trade it first armed on, since one absolute level lands
+    # on the wrong side of the next position (``Engine._price_level_spent``).
 
     @staticmethod
     def _bracket_spec(kind: str, price: Optional[float], distance: Optional[float]) -> dict:
@@ -296,11 +299,11 @@ class BarContext:
         Note this is a *touch* fill, at the target price (or at the open when
         the bar gapped past it). That is the right model for a resting limit
         order, and it is not the same rule as letting the bar close through
-        the target and leaving at the next open -- see the measurement in
-        ``strategies/momentum_barrier.py``, where the second rule is worth
-        roughly twice as much because the trades that blow through the target
-        are the ones worth keeping. Which rule suits a strategy is an
-        empirical question; this one is opt-in.
+        the target and leaving at the next open (written in ``on_bar``). The
+        two can differ by a lot: the trades that blow through a target are
+        often the ones worth keeping, and a touch fill caps every one of them.
+        Which rule suits a strategy is an empirical question; this one is
+        opt-in.
         """
         self._engine.tp_spec[sym] = self._bracket_spec('set_take_profit', price, distance)
 

@@ -1,6 +1,6 @@
 """Cash, positions, margin, commission, and forced liquidation.
 
-Equity/margin model (docs/rewrite-plan.md §5): margin is never deducted from
+Equity/margin model (Capital limits in docs/backtest.md): margin is never deducted from
 cash -- it is only checked as a capital-usage limit. Positions are tracked at
 weighted-average cost; every fill that reduces or flips a position realizes
 ``(fill_price - avg_entry) × sign(position) × closed_qty × multiplier``

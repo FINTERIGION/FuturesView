@@ -24,7 +24,11 @@ jobs:
         # The extras in pyproject.toml, not requirements.txt: the web panel's
         # deps (fastapi, uvicorn, httpx) live only there, and tests/test_web_api.py
         # fails at import without them.
-        run: pip install -e ".[test,web]"
+        run: pip install -e ".[test,web,lint]"
+
+      # Rules in pyproject.toml's [tool.ruff.lint]: correctness checks only.
+      - name: Lint
+        run: ruff check .
 
       - name: Run tests
         run: pytest
@@ -46,6 +50,8 @@ jobs:
           cache-dependency-path: webui/package-lock.json
 
       - run: npm ci
+
+      - run: npm run lint
 
       # `build` is `tsc -b && vite build`, so this typechecks the tests too --
       # they are inside tsconfig's include and would otherwise only be checked

@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import type { JobState } from '../api/types'
+import { Icon } from './Icon'
 import { TERMINAL } from '../hooks/useJob'
 import type { LogLine } from '../hooks/useJob'
 
@@ -51,6 +52,9 @@ export function JobProgress({
     <div className="job-progress">
       <div className="toolbar" style={{ marginBottom: 8 }}>
         <span className={`badge ${showBlownUp ? 'badge-danger' : STATUS_BADGE[state.status] ?? 'badge-neutral'}`}>
+          {/* The dot pulses only under .badge-accent -- i.e. while running --
+              which is what separates "queued" from "running" at a glance. */}
+          <span className="dot" />
           {showBlownUp ? t('backtest.blownUp') : t(`jobs.${state.status}`)}
         </span>
         <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{state.message}</span>
@@ -61,6 +65,7 @@ export function JobProgress({
         <div className="spacer" />
         {canCancel && (
           <button className="btn btn-sm btn-danger" onClick={onCancel}>
+            <Icon name="close" size={13} />
             {t('jobs.cancel')}
           </button>
         )}
@@ -70,17 +75,20 @@ export function JobProgress({
       </div>
       {unresolved && (
         <div className="hint-banner warning" style={{ marginBottom: 10 }}>
-          {t('jobs.lostHint')}
+          <Icon name="alert" />
+          <span>{t('jobs.lostHint')}</span>
         </div>
       )}
       {showBlownUp && (
         <div className="hint-banner danger" style={{ marginBottom: 10 }}>
-          {t('backtest.blownUpHint')}
+          <Icon name="alert" />
+          <span>{t('backtest.blownUpHint')}</span>
         </div>
       )}
       {state.error && (
         <div className="hint-banner warning" style={{ marginBottom: 10 }}>
-          {state.error}
+          <Icon name="alert" />
+          <span>{state.error}</span>
         </div>
       )}
       {logs.length > 0 && (

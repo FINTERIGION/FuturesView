@@ -83,14 +83,12 @@ def start_backtest(body: BacktestRequest):
         job.progress = 0.9
         result, metrics = outcome['result'], outcome['metrics']
         # `compute_metrics` returns `{}` outright for a run with no recorded
-        # bars, and that is exactly what an account which starts insolvent
-        # (cash <= 0) produces: the engine flags the blow-up on bar 0 and
-        # stops, so nothing is ever appended to `equity_records` and the
-        # `blown_up` it was handed never makes it into the dict. The run then
-        # reached the panel as a clean, empty success -- a green "done" over a
-        # grid of "n/a". Carry the engine's own flag through so the panel can
-        # say what actually happened. A no-op for a normal run, where
-        # `metrics['blown_up']` already holds this same value.
+        # bars, dropping the `blown_up` it was handed. An account that starts
+        # insolvent used to get here -- flagged on bar 0, nothing recorded,
+        # a green "done" over a grid of "n/a" -- and is now refused as a 422
+        # (`BacktestRequest.cash`). Kept so the flag is always present, and
+        # always the engine's own, whatever else leaves a run empty. A no-op
+        # for a normal run, where `metrics['blown_up']` already holds it.
         metrics = {**metrics, 'blown_up': bool(result['blown_up'])}
         artifact = _build_artifact(market, symbols, result)
         store.finish_run(run_id, status='done', metrics=metrics, artifact=artifact)

@@ -111,6 +111,11 @@ class DataManager:
         existing positions can mark to the last session; open/high/low are
         flattened to that close so a dark bar cannot print a fake open.
         ``bfill`` is never used.
+
+        Settle is carried, not flattened with the others. It used to be set to
+        the carried *close*, which put a ``close - settle`` step into any
+        settle-to-settle series on a day nothing traded -- and a second one,
+        the other way, on the next day that did.
         """
         frame = cdf.copy()
         for col in _ALIGN_COLS:
@@ -123,7 +128,7 @@ class DataManager:
         out['volume'] = out['volume'].where(session, 0).fillna(0)
         out['session'] = session.astype(float)
         dark = out['close'].notna() & ~session
-        for col in ('open', 'high', 'low', 'settle'):
+        for col in ('open', 'high', 'low'):
             out.loc[dark, col] = out.loc[dark, 'close']
         return out
 
@@ -209,25 +214,6 @@ class DataManager:
         df.sort_values(['date', 'contract'], inplace=True)
         return df.reset_index(drop=True)
 
-    @staticmethod
-    def _codes_in_window(raw: pd.DataFrame, index: pd.DatetimeIndex) -> list:
-        """Return feed names for contract segments that print inside ``index``."""
-        if raw.empty or index.empty:
-            return []
-        start, end = index.min(), index.max()
-        df = raw if 'expiry' in raw.columns else annotate_expiries(raw)
-        window = df[(df['date'] >= start) & (df['date'] <= end)]
-        colliding = colliding_codes(df, start, end)
-        names = []
-        seen = set()
-        for code, expiry in zip(window['contract'], window['expiry']):
-            name = contract_feed_name(code, expiry, colliding)
-            if name in seen:
-                continue
-            seen.add(name)
-            names.append(name)
-        return names
-
     def _contract_segments(
         self, raw: pd.DataFrame, index: pd.DatetimeIndex
     ) -> list:
@@ -257,8 +243,7 @@ class DataManager:
 
         This is what ``core.market.ContractSeries`` is built from -- a
         63-contract x 1610-bar union calendar would be ~85% padding; keeping
-        just the real rows is the whole point of the rewrite (see
-        docs/rewrite-plan.md §6).
+        just the real rows is the whole point.
         """
         frames = {}
         for name, cdf in segments:

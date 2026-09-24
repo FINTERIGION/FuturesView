@@ -1,12 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { errorMessage } from '../api/client'
 import { backtestApi, runsApi, strategiesApi } from '../api/endpoints'
 import type { RunDetail } from '../api/types'
+import { Icon } from '../components/Icon'
 import { JobProgress } from '../components/JobProgress'
-import { paramsAreValid } from '../components/ParamEditor'
+import { useToast } from '../components/Toast'
 import { useJobSlot } from '../shell/JobsProvider'
+import { useHotkeys } from '../shell/useHotkeys'
 import { useStickyState } from '../hooks/useStickyState'
 import { useWorkspace } from '../shell/WorkspaceContext'
 import { BacktestForm } from './BacktestForm'
@@ -19,30 +21,34 @@ import { sharedFormDefaults } from './sharedFormDefaults'
  * `extraSymbols` directly), not something this panel seeds. Every field is
  * optional because a prefill applies whatever it names and leaves the rest
  * at their sticky values -- a prefill carrying only a strategy and symbols,
- * for instance, has no cash/slippage/params to name. */
+ * for instance, has no cash/slippage to name. */
 export interface BacktestFieldsPrefill {
   strategy?: string
   start?: string
   end?: string
   cash?: number
   slippage?: number
-  params?: Record<string, unknown>
 }
 
 /**
  * The drawer's Backtest tab. Ported from the old `BacktestPage` essentially
- * unchanged: the sticky-state fields, the params-owner ref that clears
- * params only on a *real* strategy switch, and the one-shot
- * `useState(() => prefill)` read are all the same load-bearing behavior --
- * only the prefill's source changed, from `useLocation().state` to a prop
- * the shell remounts this component on (`key={seq}` at the call site, see
- * BottomDrawer.tsx). The universe is no longer picked here: it comes from
+ * unchanged: the sticky-state fields and the one-shot `useState(() =>
+ * prefill)` read are the same load-bearing behavior -- only the prefill's
+ * source changed, from `useLocation().state` to a prop the shell remounts
+ * this component on (`key={seq}` at the call site, see BottomDrawer.tsx).
+ * The universe is no longer picked here: it comes from
  * `WorkspaceContext.universe`, the same list the sidebar's checkboxes edit.
+ *
+ * Strategy parameters are not part of this form. A run sends none, so the
+ * engine uses each strategy's declared defaults -- including a run reopened
+ * from the History tab, which reproduces that run's window and costs but not
+ * whatever parameters it was launched with.
  */
 export function BacktestPanel({ prefill }: { prefill?: BacktestFieldsPrefill }) {
   const { t } = useTranslation()
   const job = useJobSlot('backtest')
   const queryClient = useQueryClient()
+  const toast = useToast()
   const [error, setError] = useState<string | null>(null)
   const { universe, runId, setRunId } = useWorkspace()
 
@@ -61,40 +67,46 @@ export function BacktestPanel({ prefill }: { prefill?: BacktestFieldsPrefill }) 
   const [end, setEnd] = useStickyState('end', sharedFormDefaults.end, initialPrefill?.end)
   const [cash, setCash] = useStickyState('cash', sharedFormDefaults.cash, initialPrefill?.cash)
   const [slippage, setSlippage] = useStickyState('slippage', sharedFormDefaults.slippage, initialPrefill?.slippage)
-  const [params, setParams] = useState<Record<string, unknown>>(initialPrefill?.params ?? {})
 
-  const strategy = useMemo(() => strategies?.find((s) => s.key === strategyKey), [strategies, strategyKey])
-  const paramsValid = useMemo(
-    () => !strategy || paramsAreValid(strategy.params, strategy.space, params),
-    [strategy, params],
-  )
   // Slippage is a cost and cannot be negative -- a negative one fills every
   // trade better than the market and inflates the whole run. The API rejects
   // it too (web/schemas.py); blocking it here is so the user is told before
-  // they wait for a job, and matches how out-of-range params already read.
+  // they wait for a job.
   const slippageValid = slippage >= 0
 
   useEffect(() => {
-    if (strategies && strategies.length > 0 && !strategyKey) {
-      setStrategyKey(strategies[0].key)
+    const firstRunnable = strategies?.find((s) => s.errors.length === 0)
+    if (firstRunnable && !strategyKey) {
+      setStrategyKey(firstRunnable.key)
     }
   }, [strategies, strategyKey, setStrategyKey])
 
-  // Params belong to one strategy, so switching strategy has to clear them --
-  // but only a real switch, not this component being remounted with a
-  // prefill for the strategy it already had.
-  const paramsOwner = useRef(strategyKey)
-  useEffect(() => {
-    if (paramsOwner.current === strategyKey) return
-    paramsOwner.current = strategyKey
-    setParams({})
-  }, [strategyKey])
+  // The remembered pick can be a strategy whose file has since broken; the
+  // form lists it disabled with its error, and there is nothing to run.
+  const strategyBroken = Boolean(strategies?.find((s) => s.key === strategyKey)?.errors.length)
+
+  // The run whose outcome has already been announced. A toast is not
+  // idempotent the way `invalidateQueries` is, and this effect re-runs on
+  // every render while the status sits terminal.
+  const announcedJob = useRef<string | null>(null)
 
   useEffect(() => {
-    if (job.state?.status === 'done') {
-      void queryClient.invalidateQueries({ queryKey: ['runs'] })
+    const state = job.state
+    if (!state || !['done', 'error'].includes(state.status)) return
+    if (state.status === 'done') void queryClient.invalidateQueries({ queryKey: ['runs'] })
+    if (announcedJob.current === state.id) return
+    announcedJob.current = state.id
+    // Said out here as well as in the progress block below, because a run
+    // takes long enough that the drawer is often collapsed or on the History
+    // tab by the time it lands.
+    if (state.status === 'error') {
+      toast.push({ kind: 'error', title: t('backtest.runFailed'), message: state.error ?? undefined })
+    } else {
+      toast.push({ kind: 'success', title: t('backtest.runFinished') })
     }
-  }, [job.state?.status, queryClient])
+  }, [job.state, queryClient, toast, t])
+
+  const canRun = !job.isActive && Boolean(strategyKey) && !strategyBroken && universe.length > 0 && slippageValid
 
   const runBacktest = async () => {
     setError(null)
@@ -106,7 +118,6 @@ export function BacktestPanel({ prefill }: { prefill?: BacktestFieldsPrefill }) 
         end,
         cash,
         slippage,
-        params,
       })
       job.start(job_id)
       // A fresh run gets its own overlay even if the server hands back an id
@@ -117,6 +128,15 @@ export function BacktestPanel({ prefill }: { prefill?: BacktestFieldsPrefill }) 
       setError(errorMessage(err))
     }
   }
+
+  // Ctrl/⌘+Enter launches the run from anywhere in the workspace -- the form
+  // is a handful of remembered fields that rarely change between runs, so the
+  // common case is "open the drawer, press it again".
+  useHotkeys({
+    'mod+enter': () => {
+      if (canRun) void runBacktest()
+    },
+  })
 
   const [lastRunId, setLastRunId] = useState<string | null>(null)
   /** The run this panel has already put on the chart. Each finished run is
@@ -168,21 +188,19 @@ export function BacktestPanel({ prefill }: { prefill?: BacktestFieldsPrefill }) 
           slippage={slippage}
           onSlippageChange={setSlippage}
           slippageValid={slippageValid}
-          strategy={strategy}
-          params={params}
-          onParamsChange={(name, value) => setParams((p) => ({ ...p, [name]: value }))}
         />
 
         {error && <div className="hint-banner warning">{error}</div>}
-        {!paramsValid && <div className="hint-banner warning">{t('strategy.paramsOutOfRange')}</div>}
         {!slippageValid && <div className="hint-banner warning">{t('common.slippageNegative')}</div>}
 
         <button
-          className="btn btn-primary"
+          className="btn btn-primary btn-block"
           onClick={() => void runBacktest()}
-          disabled={job.isActive || !strategyKey || universe.length === 0 || !paramsValid || !slippageValid}
-          style={{ marginTop: 8, width: '100%', justifyContent: 'center' }}
+          disabled={!canRun}
+          style={{ marginTop: 8 }}
+          title={t('backtest.runBacktestHint')}
         >
+          {job.isActive ? <span className="spinner" /> : <Icon name="line-chart" size={14} />}
           {t('backtest.runBacktest')}
         </button>
 
@@ -200,7 +218,22 @@ export function BacktestPanel({ prefill }: { prefill?: BacktestFieldsPrefill }) 
         )}
       </div>
 
-      <div className="panel-main">{run && <ResultTables run={run} />}</div>
+      <div className="panel-main">
+        {run ? (
+          <ResultTables run={run} />
+        ) : (
+          // The results half is the larger of the two columns and sat blank
+          // until a run landed, which read as something failing to load rather
+          // than as nothing having been asked for yet.
+          <div className="empty-state">
+            <span className="empty-state-icon">
+              <Icon name="line-chart" size={18} />
+            </span>
+            <span className="empty-state-title">{t('backtest.noRunYet')}</span>
+            <p className="empty-state-hint">{t('backtest.noRunYetHint')}</p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

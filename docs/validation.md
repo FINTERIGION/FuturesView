@@ -86,4 +86,4 @@ Every Sharpe in the report is annualized and in excess of `core.metrics.DEFAULT_
 | --- | --- |
 | `--strategy` | Required. A discovered short name, or a `module.path:ClassName` reference |
 
-Prints the range each parameter is perturbed over by the sensitivity check. Ranges come from the strategy's `space` declaration; anything not declared and not in `fixed_params` gets a heuristic range inferred from its default value. Nothing searches these ranges — they set the step size for a one-notch perturbation, and the web panel's parameter editor uses the same bounds to flag a value typed outside them.
+Prints the range each parameter is perturbed over by the sensitivity check. Ranges come from the strategy's `space` declaration; anything not declared and not in `fixed_params` gets a heuristic range inferred from its default value. Nothing searches these ranges — they set the step size for a one-notch perturbation.

@@ -4,7 +4,7 @@ Built from ``datafeed.data_manager.DataManager.get_universe_bundle()``. Each
 contract stores only the bars where it actually printed a real exchange
 quote, not padded to the full union calendar -- a 63-contract x 1610-bar
 union calendar is ~85% padding; storing only real rows is the point of this
-rewrite (see docs/rewrite-plan.md §6).
+module.
 """
 
 from __future__ import annotations

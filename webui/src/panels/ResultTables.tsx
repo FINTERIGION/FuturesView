@@ -46,9 +46,18 @@ export function ResultTables({ run }: { run: RunDetail }) {
     { key: 'direction', header: t('backtest.direction'), render: (r) => r.direction },
     { key: 'open_date', header: t('common.start'), render: (r) => r.open_date },
     { key: 'close_date', header: t('common.end'), render: (r) => r.close_date ?? '—' },
-    { key: 'size', header: 'Size', render: (r) => r.size },
-    { key: 'net_pnl', header: 'Net PnL', render: (r) => r.net_pnl.toFixed(2) },
-    { key: 'exit_reason', header: 'Exit', render: (r) => r.exit_reason },
+    { key: 'size', header: t('backtest.size'), numeric: true, render: (r) => r.size },
+    {
+      key: 'net_pnl',
+      header: t('backtest.netPnl'),
+      numeric: true,
+      render: (r) => (
+        <span className={r.net_pnl > 0 ? 'num-pos' : r.net_pnl < 0 ? 'num-neg' : undefined}>
+          {r.net_pnl.toFixed(2)}
+        </span>
+      ),
+    },
+    { key: 'exit_reason', header: t('backtest.exit'), render: (r) => r.exit_reason },
   ]
 
   const bySymbol = (run.metrics?.['by_symbol'] as Record<string, Record<string, number>>) ?? {}
@@ -77,7 +86,9 @@ export function ResultTables({ run }: { run: RunDetail }) {
       {run.metrics && <MetricStats metrics={run.metrics} />}
 
       <div style={{ marginTop: 16 }}>
-        <Tabs items={tabs} active={tab} onChange={setTab} />
+        <div className="tabs-bar">
+          <Tabs items={tabs} active={tab} onChange={setTab} />
+        </div>
 
         {tab === 'trades' && (
           <Table columns={tradeColumns} rows={run.trade_logs} rowKey={(r) => String(r.trade_id)} maxHeight={420} />

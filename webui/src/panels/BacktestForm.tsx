@@ -1,7 +1,29 @@
 import { useTranslation } from 'react-i18next'
 import type { StrategyInfo } from '../api/types'
-import { ParamEditor } from '../components/ParamEditor'
 
+/** Windows worth one click. A backtest is nearly always run over "the last
+ * few years", and typing two ISO dates to say so was the most repeated
+ * keystroke in this form. */
+const RANGE_PRESETS = [1, 3, 5, 10]
+
+/** `YYYY-MM-DD` of `d` on the user's own calendar. Not `toISOString()`, which
+ * is the UTC date: east of Greenwich that is still yesterday for the first
+ * hours of every day -- until 08:00 in Beijing. */
+function localIsoDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function isoYearRange(years: number): { start: string; end: string } {
+  const end = new Date()
+  const start = new Date(end)
+  start.setFullYear(start.getFullYear() - years)
+  return { start: localIsoDate(start), end: localIsoDate(end) }
+}
+
+/** The Backtest tab's run form: which strategy, over which universe, and the
+ * run's own settings (window, cash, slippage). Strategy parameters are not
+ * edited here -- a run always uses the strategy's declared defaults. */
 export function BacktestForm({
   strategies,
   strategyKey,
@@ -16,9 +38,6 @@ export function BacktestForm({
   slippage,
   onSlippageChange,
   slippageValid,
-  strategy,
-  params,
-  onParamsChange,
 }: {
   strategies: StrategyInfo[]
   strategyKey: string
@@ -33,11 +52,11 @@ export function BacktestForm({
   slippage: number
   onSlippageChange: (v: number) => void
   slippageValid: boolean
-  strategy: StrategyInfo | undefined
-  params: Record<string, unknown>
-  onParamsChange: (name: string, value: unknown) => void
 }) {
   const { t } = useTranslation()
+  // Listed, not hidden: a strategy that vanished from the dropdown the moment
+  // its file stopped compiling left whoever saved it nowhere to read why.
+  const broken = strategies.filter((s) => s.errors.length > 0)
 
   return (
     <>
@@ -45,20 +64,35 @@ export function BacktestForm({
         <label>{t('common.strategy')}</label>
         <select value={strategyKey} onChange={(e) => onStrategyChange(e.target.value)}>
           {strategies.map((s) => (
-            <option key={s.key} value={s.key}>
-              {s.key}
+            <option key={s.key} value={s.key} disabled={s.errors.length > 0}>
+              {s.errors.length > 0 ? `${s.key} (${t('backtest.strategyBroken')})` : s.key}
             </option>
           ))}
         </select>
+        {broken.length > 0 && (
+          <div className="field-error">
+            {t('backtest.strategyBrokenHint')}
+            {broken.map((s) => (
+              <div key={s.key}>
+                <code>{s.module}</code>: {s.errors.join('; ')}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="field">
-        <label>{t('common.symbols')}</label>
-        <div className="toolbar" style={{ flexWrap: 'wrap' }}>
+        <label>
+          {t('common.symbols')} ({universe.length})
+        </label>
+        <div className="toolbar">
           {universe.length === 0 ? (
             <span className="badge badge-neutral">{t('workspace.noProducts')}</span>
           ) : (
             universe.map((sym, i) => (
+              // The first chip is the charted product, which is in this
+              // universe structurally -- the accent says which one the main
+              // chart is showing, not which one matters more to the run.
               <span key={sym} className={`badge ${i === 0 ? 'badge-accent' : 'badge-neutral'}`}>
                 {sym}
               </span>
@@ -66,6 +100,30 @@ export function BacktestForm({
           )}
         </div>
         <p className="field-hint">{t('workspace.universeFromSidebar')}</p>
+      </div>
+
+      <div className="field">
+        <label>{t('backtest.range')}</label>
+        <div className="toolbar">
+          {RANGE_PRESETS.map((years) => {
+            const range = isoYearRange(years)
+            const active = start === range.start && end === range.end
+            return (
+              <button
+                key={years}
+                type="button"
+                className={`btn btn-sm ${active ? 'btn-primary' : ''}`}
+                title={t('backtest.lastYears', { n: years })}
+                onClick={() => {
+                  onStartChange(range.start)
+                  onEndChange(range.end)
+                }}
+              >
+                {years}Y
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       <div className="form-grid">
@@ -93,19 +151,6 @@ export function BacktestForm({
           />
         </div>
       </div>
-
-      {strategy && (
-        <>
-          <h3 style={{ margin: '16px 0 8px', fontSize: 13, color: 'var(--text-muted)' }}>{t('strategy.params')}</h3>
-          <ParamEditor
-            defaults={strategy.params}
-            space={strategy.space}
-            fixedParams={strategy.fixed_params}
-            values={params}
-            onChange={onParamsChange}
-          />
-        </>
-      )}
     </>
   )
 }

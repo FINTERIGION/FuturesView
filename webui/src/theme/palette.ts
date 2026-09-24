@@ -1,7 +1,8 @@
 // Validated categorical/status palette from the dataviz skill
 // (references/palette.md). Kept as plain hex arrays because ECharts renders
 // to canvas and needs literal colors, not CSS custom properties -- see
-// useChartTheme() for how these pair with light/dark chart surfaces.
+// chartTokens() in charts/theme.ts for how these pair with light/dark chart
+// surfaces.
 
 export const CATEGORICAL_LIGHT = [
   '#2a78d6', // 1 blue

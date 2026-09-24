@@ -1,6 +1,6 @@
 # Writing a Strategy
 
-Subclass `Strategy` from `strategies.base`, precompute indicators in `setup`, trade in `on_bar`. Drop the file anywhere under `strategies/`, then modules are discovered automatically, and the short CLI name is the class name snake-cased without a trailing `_strategy` (`DoubleMaStrategy` → `double_ma`).
+Subclass `Strategy` from `strategies.base`, precompute indicators in `setup`, trade in `on_bar`. Drop the file anywhere under `strategies/`, then modules are discovered automatically, and the short CLI name is the class name snake-cased without a trailing `_strategy` (`DoubleMaStrategy` → `double_ma`). Two classes that reduce to the same name make discovery raise until one is renamed, rather than one silently shadowing the other.
 
 ```python
 import talib
@@ -79,13 +79,16 @@ Orders always fill against that day's calendar contract, so strategy code never 
 
 ### The protective bracket
 
-`set_stop` and `set_take_profit` are the two legs of one OCO bracket. Both arm at the next OPEN against the fill that just happened, are then checked intrabar against the execution contract's high/low, and close the **whole** position when touched. Whichever fills first cancels the other. Each rule is sticky: it survives a dark session and re-arms after a close and reopen, so cancel it explicitly when a strategy exits for its own reasons.
+`set_stop` and `set_take_profit` are the two legs of one OCO bracket. Both arm at the next OPEN against the fill that just happened, are then checked intrabar against the execution contract's high/low, and close the **whole** position when touched. Whichever fills first cancels the other. Both rules survive a dark session. What happens after the position closes depends on the kind of rule:
+
+- A `distance` rule carries into the next trade and re-arms against that trade's entry, so cancel it explicitly when a strategy exits for its own reasons.
+- A `price` rule belongs to the trade it first armed on and is dropped when that trade ends — closed, reversed, or force-liquidated. One absolute level carried into the next trade would sit on the wrong side of it: a long's stop below the market is a short's stop that fills at the short's first open. Set a fresh `price` for each trade. One set while flat waits for the entry it was set for, even if that entry is held over a dark session.
 
 **The level follows the rule and the position, both.** A resting leg is re-resolved at the next OPEN whenever what it was resolved *from* moves — the position's average cost, its side, or the contract it sits on. So:
 
 - Calling `set_stop` again while one already rests **does** move it, at the next OPEN. That is how a trailing stop is written; no `cancel_stop` first.
 - Adding to a position re-anchors a `distance` leg against the new average cost, which is what "`distance` below its cost" means once there is more than one fill in the position. Pass an explicit `price` to pin a level that should not move.
-- Reversing re-arms on the correct side of the new position, and a roll moves the level onto the new contract's price scale (see [Backtesting](backtest.md)).
+- Reversing re-arms a `distance` leg on the correct side of the new position and drops a `price` leg, and a roll moves the level onto the new contract's price scale (see [Backtesting](backtest.md)).
 - A dark session changes nothing. It cannot fill either leg, so it does not touch them either.
 
 Pass a `distance`, not a `price`, whenever you can. Signals come off the OI-weighted continuous series but fills land on a real contract, and the two run a basis of a few percent — a level lifted from the weighted series lands in the wrong place, while a distance is anchored on the actual fill and the basis cancels.

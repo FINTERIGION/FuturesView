@@ -1,8 +1,11 @@
 import { useCallback, useRef } from 'react'
-import type { PointerEvent as ReactPointerEvent } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
 
 const MIN_HEIGHT = 160
 const MAX_RATIO = 0.7
+/** One arrow press. Large enough to get somewhere in a few taps, small enough
+ * to land on a height you actually wanted. */
+const KEY_STEP = 24
 
 /** Pure clamp, tested without synthesizing pointer events: never smaller
  * than a form actually needs, never so tall it swallows the chart above it. */
@@ -13,27 +16,37 @@ export function clampDrawerHeight(height: number, viewportHeight: number): numbe
 
 /**
  * Drag-to-resize for the drawer's top edge. The live drag writes straight to
- * a CSS custom property via `document.documentElement.style`, not React
- * state -- state updates on every `pointermove` would re-render the whole
- * workspace tree at drag speed. Only the final height, on `pointerup`,
- * reaches `onCommit` (and from there, sticky storage).
+ * a CSS custom property, not React state -- state updates on every
+ * `pointermove` would re-render the whole workspace tree at drag speed. Only
+ * the final height, on `pointerup`, reaches `onCommit` (and from there,
+ * sticky storage).
+ *
+ * That property has to be set on the same element that declares it. The
+ * workspace grid carries `--drawer-h` in its own inline style (see
+ * ChartWorkspace), and an element's inline declaration beats anything it would
+ * otherwise inherit -- so a drag that wrote to `document.documentElement`, as
+ * this used to, changed a value nothing read, and the drawer sat still until
+ * the pointer came up and React re-rendered it in one jump.
+ *
+ * Arrow keys drive the same edge, one `KEY_STEP` at a time, and commit
+ * immediately: there is no drag to be in the middle of.
  */
 export function useDrawerResize(height: number, onCommit: (height: number) => void) {
   const draggingRef = useRef(false)
 
   const onPointerDown = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
+    (e: ReactPointerEvent<HTMLElement>) => {
       const handle = e.currentTarget
       const startY = e.clientY
       const startHeight = height
-      const root = document.documentElement
+      const grid = handle.closest<HTMLElement>('.workspace') ?? document.documentElement
       draggingRef.current = true
       handle.setPointerCapture(e.pointerId)
       document.body.classList.add('drawer-resizing')
 
       const apply = (clientY: number) => {
         const next = clampDrawerHeight(startHeight + (startY - clientY), window.innerHeight)
-        root.style.setProperty('--drawer-h', `${next}px`)
+        grid.style.setProperty('--drawer-h', `${next}px`)
         return next
       }
 
@@ -54,5 +67,15 @@ export function useDrawerResize(height: number, onCommit: (height: number) => vo
     [height, onCommit],
   )
 
-  return { onPointerDown }
+  const onHandleKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLElement>) => {
+      const step = e.key === 'ArrowUp' ? KEY_STEP : e.key === 'ArrowDown' ? -KEY_STEP : 0
+      if (step === 0) return
+      e.preventDefault()
+      onCommit(clampDrawerHeight(height + step, window.innerHeight))
+    },
+    [height, onCommit],
+  )
+
+  return { onPointerDown, onHandleKeyDown }
 }

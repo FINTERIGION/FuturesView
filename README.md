@@ -71,6 +71,7 @@ python ft.py web
 | [Data Pipeline](docs/data.md)              | Exchange downloads, `ft.py data` flags, generated files, product registry             |
 | [Backtesting](docs/backtest.md)            | `ft.py backtest` flags, four-phase execution model, outputs, metrics                  |
 | [Writing a Strategy](docs/strategy.md)     | `Strategy` lifecycle, `SetupContext` / `BarContext` API, conventions                  |
+| [Writing an Indicator](docs/indicator.md)  | `Indicator` class, `Output` styling, panes and value ranges, the picker in the panel  |
 | [Overfitting Checks](docs/validation.md)   | `ft.py validate`, walk-forward and sub-period splits, sensitivity, bootstrap, PBO, DSR |
 | [Web Panel](docs/web.md)                   | Browser UI for products, data, backtest, run history                                  |
 | [Project Layout](docs/architecture.md)     | Directory map, tests                                                                  |

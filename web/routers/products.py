@@ -23,6 +23,7 @@ from datafeed.products import (
     save_registry,
 )
 
+from web.barscache import cache as bars_cache
 from web.data_status import coverage_for, data_file_paths
 from web.jobs import manager as job_manager
 from web.marketcache import cache as market_cache
@@ -54,6 +55,7 @@ def _write_registry(registry: dict) -> None:
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
     market_cache.invalidate()
+    bars_cache.invalidate()
 
 
 def _product_view(code: str) -> dict:
@@ -134,8 +136,7 @@ def product_bars(code: str, start: str = None, end: str = None):
     if code not in PRODUCTS:
         raise HTTPException(status_code=404, detail=f'Unknown product {code!r}')
     try:
-        dm = DataManager(symbols=[code])
-        df = dm.load_dataframe(start_date=start, end_date=end, symbol=code)
+        df = bars_cache.get(code, start, end)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:

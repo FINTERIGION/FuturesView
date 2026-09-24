@@ -120,6 +120,22 @@ def _get_conn() -> sqlite3.Connection:
     return _conn
 
 
+def _artifact_file(stored: Optional[str]) -> Optional[str]:
+    """Where a row's artifact lives, from what its ``artifact_path`` holds.
+
+    The column holds the file's *name*, resolved against ``WEB_RESULTS_DIR``
+    as it is now. Rows written before that held an absolute path, and moving
+    or renaming the project directory left every one of them pointing at
+    nothing: the history still listed the runs, but opened each with no
+    equity curve or trades, and neither pruning nor Delete could find the file
+    to remove it. Only the basename of such a path is used, so old rows
+    follow the directory too.
+    """
+    if not stored:
+        return None
+    return os.path.join(WEB_RESULTS_DIR, os.path.basename(stored.replace('\\', '/')))
+
+
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
     d['symbols'] = json.loads(d['symbols']) if d.get('symbols') else []
@@ -152,7 +168,7 @@ def _prune_locked(conn: sqlite3.Connection) -> None:
     if not stale:
         return
     for row in stale:
-        path = row['artifact_path']
+        path = _artifact_file(row['artifact_path'])
         if path and os.path.exists(path):
             try:
                 os.remove(path)
@@ -198,18 +214,18 @@ def finish_run(
     own. Metrics are the one exception -- see the module docstring on why
     ``metrics_json`` below is *not* run through this.
     """
-    artifact_path = None
+    artifact_name = None
     if artifact is not None:
         os.makedirs(WEB_RESULTS_DIR, exist_ok=True)
-        artifact_path = os.path.join(WEB_RESULTS_DIR, f'{run_id}.json')
-        with open(artifact_path, 'w', encoding='utf-8') as f:
+        artifact_name = f'{run_id}.json'
+        with open(_artifact_file(artifact_name), 'w', encoding='utf-8') as f:
             json.dump(jsonable(artifact), f)
 
     with _lock:
         conn = _get_conn()
         conn.execute(
             'UPDATE runs SET status=?, metrics_json=?, artifact_path=?, error=? WHERE id=?',
-            (status, json.dumps(metrics) if metrics is not None else None, artifact_path, error, run_id),
+            (status, json.dumps(metrics) if metrics is not None else None, artifact_name, error, run_id),
         )
         conn.commit()
 
@@ -226,7 +242,7 @@ def get_artifact(run_id: str) -> Optional[dict]:
     row = get_run(run_id)
     if row is None or not row.get('artifact_path'):
         return None
-    path = row['artifact_path']
+    path = _artifact_file(row['artifact_path'])
     if not os.path.exists(path):
         return None
     with open(path, encoding='utf-8') as f:
@@ -269,7 +285,7 @@ def delete_run(run_id: str) -> bool:
                 f'Run {run_id!r} is still running; wait for it to finish (or cancel its job) '
                 f'before deleting it.'
             )
-        path = row['artifact_path']
+        path = _artifact_file(row['artifact_path'])
         if path and os.path.exists(path):
             os.remove(path)
         conn.execute('DELETE FROM runs WHERE id=?', (run_id,))

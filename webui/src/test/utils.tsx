@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
-import type { RunDetail, RunSummary, StrategyInfo } from '../api/types'
+import type { IndicatorInfo, RunDetail, RunSummary, StrategyInfo } from '../api/types'
+import { ToastProvider } from '../components/Toast'
 import { JobsProvider } from '../shell/JobsProvider'
 import { WorkspaceProvider } from '../shell/WorkspaceContext'
 
@@ -24,7 +25,9 @@ export function renderWorkspace(ui: ReactElement, opts?: { path?: string }) {
     <QueryClientProvider client={testQueryClient()}>
       <MemoryRouter initialEntries={[opts?.path ?? '/?symbol=SA']}>
         <WorkspaceProvider>
-          <JobsProvider>{ui}</JobsProvider>
+          <JobsProvider>
+            <ToastProvider>{ui}</ToastProvider>
+          </JobsProvider>
         </WorkspaceProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -42,6 +45,7 @@ export const STRATEGIES: StrategyInfo[] = [
     fixed_params: [],
     space: { fast: { kind: 'int', low: 2, high: 100 }, slow: { kind: 'int', low: 5, high: 200 } },
     space_error: null,
+    errors: [],
   },
   {
     key: 'chan_theory',
@@ -53,6 +57,7 @@ export const STRATEGIES: StrategyInfo[] = [
     fixed_params: [],
     space: { atr_mult: { kind: 'float', low: 0.5, high: 5 } },
     space_error: null,
+    errors: [],
   },
 ]
 
@@ -104,3 +109,47 @@ export function runDetail(id: string, symbols: string[]): RunDetail {
 
 export const EMPTY_BARS = { symbol: 'SA', bars: [] }
 export const EMPTY_ROLL = { symbol: 'SA', roll: [] }
+
+/** One main-pane and one sub-pane indicator -- enough for a test to tell the
+ * two layouts apart without standing in for the real `indicators/` catalog. */
+export const INDICATORS: IndicatorInfo[] = [
+  {
+    key: 'ma',
+    label: 'MA',
+    class_name: 'Ma',
+    module: 'indicators.ma',
+    file: 'indicators/ma.py',
+    docstring: 'Simple moving averages.',
+    pane: 'main',
+    precision: 2,
+    value_range: null,
+    guides: [],
+    outputs: [
+      { key: 'fast', label: 'fast', kind: 'line', color: 0, style: 'solid' },
+      { key: 'slow', label: 'slow', kind: 'line', color: 6, style: 'solid' },
+    ],
+    params: { fast: 5, slow: 20 },
+    fixed_params: [],
+    space: {},
+    space_error: null,
+    errors: [],
+  },
+  {
+    key: 'rsi',
+    label: 'RSI',
+    class_name: 'Rsi',
+    module: 'indicators.rsi',
+    file: 'indicators/rsi.py',
+    docstring: 'Relative Strength Index.',
+    pane: 'sub',
+    precision: 1,
+    value_range: { min: 0, max: 100 },
+    guides: [30, 70],
+    outputs: [{ key: 'rsi', label: 'RSI', kind: 'line', color: 4, style: 'solid' }],
+    params: { period: 14 },
+    fixed_params: [],
+    space: {},
+    space_error: null,
+    errors: [],
+  },
+]

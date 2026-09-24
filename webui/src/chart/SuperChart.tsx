@@ -1,11 +1,12 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, errorMessage } from '../api/client'
-import { productsApi, runsApi } from '../api/endpoints'
-import type { RunDetail } from '../api/types'
-import { superChartOption } from '../charts/superChartOption'
+import { indicatorsApi, productsApi, runsApi } from '../api/endpoints'
+import type { IndicatorInfo, RunDetail } from '../api/types'
+import { MAX_SUB_PANES, superChartOption, type IndicatorLayer, type PaneKey } from '../charts/superChartOption'
 import { EChart } from '../components/EChart'
+import { Icon } from '../components/Icon'
 import { useIsDarkMode } from '../theme/useIsDarkMode'
 import { useWorkspace } from '../shell/WorkspaceContext'
 import { ChartToolbar } from './ChartToolbar'
@@ -23,7 +24,67 @@ import { ChartToolbar } from './ChartToolbar'
 export function SuperChart({ productName }: { productName?: string }) {
   const { t } = useTranslation()
   const dark = useIsDarkMode()
-  const { chartSymbol, setChartSymbol, panes, runId, setRunId } = useWorkspace()
+  const { chartSymbol, setChartSymbol, showVolume, indicators, runId, setRunId } = useWorkspace()
+
+  // The catalog is what says whether a selected indicator draws on the price
+  // pane or in its own, so it is fetched whether or not anything is selected.
+  const { data: catalog } = useQuery({
+    queryKey: ['indicators'],
+    queryFn: indicatorsApi.list,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // Only indicators the catalog still knows about and can draw. A key left in
+  // localStorage for a class the user has since deleted or broken is dropped
+  // here rather than becoming an empty pane.
+  const selected: IndicatorInfo[] = (indicators ?? [])
+    .map((key) => (catalog ?? []).find((c) => c.key === key))
+    .filter((info): info is IndicatorInfo => Boolean(info) && info!.errors.length === 0)
+
+  const values = useQueries({
+    queries: selected.map((info) => ({
+      queryKey: ['indicator', chartSymbol, info.key],
+      queryFn: () => indicatorsApi.values(chartSymbol, info.key),
+      enabled: Boolean(chartSymbol),
+      staleTime: 5 * 60 * 1000,
+      retry: false,
+    })),
+  })
+
+  const layers: IndicatorLayer[] = selected.map((info, i) => ({
+    info,
+    // `null` while in flight: the pane is laid out from the *selection*, so
+    // panes do not shuffle as each query resolves one after another.
+    values: values[i]?.data ?? null,
+  }))
+
+  // The router turns a user's raising `compute()` into a 422 carrying their
+  // own exception message, which is the whole point of that handler -- with
+  // `retry: false` and nothing reading `.error`, it would arrive and then be
+  // thrown away, leaving a permanently blank pane and no explanation.
+  const failed = selected
+    .map((info, i) => ({ info, error: values[i]?.error ?? null }))
+    .filter((e) => e.error !== null)
+
+  // Derived, never persisted -- `pane` belongs to the Python class and can
+  // change under a hot reload. Capped the same way the builder caps it, so
+  // the "too many panes" message matches what is actually drawn.
+  // Volume keeps the slot directly under the price pane whatever else is
+  // ticked -- it is read against the candles, and it does not count against
+  // `MAX_SUB_PANES`, which is about how many *indicator* panes still leave the
+  // price pane readable.
+  const subPanes = selected.filter((info) => info.pane === 'sub').map((info) => `ind:${info.key}` as PaneKey)
+  const allPanes: PaneKey[] = [
+    ...(showVolume ? (['volume'] as PaneKey[]) : []),
+    ...subPanes.slice(0, MAX_SUB_PANES),
+  ]
+  const hiddenPanes = Math.max(0, subPanes.length - MAX_SUB_PANES)
+
+  // An indicator whose window is longer than the loaded history computes to
+  // all-NaN and would otherwise draw nothing, with no hint as to why.
+  const starved = layers
+    .filter((l) => l.values && Object.values(l.values.outputs).every((o) => o.valid_from === null))
+    .map((l) => l.info.label)
 
   const { data: barsData, isLoading: barsLoading, error: barsError } = useQuery({
     queryKey: ['product-bars', chartSymbol],
@@ -63,7 +124,13 @@ export function SuperChart({ productName }: { productName?: string }) {
     return (
       <div className="chart-area">
         <ChartToolbar />
-        <div className="empty-state">{t('workspace.noProducts')}</div>
+        <div className="empty-state">
+          <span className="empty-state-icon">
+            <Icon name="line-chart" size={18} />
+          </span>
+          <span className="empty-state-title">{t('workspace.noProducts')}</span>
+          <p className="empty-state-hint">{t('workspace.noProductsHint')}</p>
+        </div>
       </div>
     )
   }
@@ -79,10 +146,13 @@ export function SuperChart({ productName }: { productName?: string }) {
       <div className="chart-area">
         <ChartToolbar productName={productName} />
         <div className="empty-state">
-          <div>{isMissing ? t('workspace.noDataForSymbol') : errorMessage(barsError)}</div>
-          {isMissing && (
-            <div style={{ marginTop: 6 }}>{t('workspace.noDataForSymbolHint')}</div>
-          )}
+          <span className="empty-state-icon">
+            <Icon name={isMissing ? 'download' : 'alert'} size={18} />
+          </span>
+          <span className="empty-state-title">
+            {isMissing ? t('workspace.noDataForSymbol') : errorMessage(barsError)}
+          </span>
+          {isMissing && <p className="empty-state-hint">{t('workspace.noDataForSymbolHint')}</p>}
         </div>
       </div>
     )
@@ -92,7 +162,10 @@ export function SuperChart({ productName }: { productName?: string }) {
     return (
       <div className="chart-area">
         <ChartToolbar productName={productName} />
-        <div className="empty-state">{t('common.loading')}</div>
+        <div className="empty-state">
+          <span className="spinner" />
+          {t('common.loading')}
+        </div>
       </div>
     )
   }
@@ -102,22 +175,49 @@ export function SuperChart({ productName }: { productName?: string }) {
   const option = superChartOption({
     dark,
     bars: barsData.bars,
-    panes,
+    panes: allPanes,
     roll: rollData?.roll,
     signals: price?.signals,
     window: runWindow,
+    indicators: layers,
   })
 
   return (
     <div className="chart-area">
       <ChartToolbar productName={productName} />
-      {run && !symbolHasPrice && (
-        <div className="hint-banner" style={{ margin: '0 12px 8px' }}>
-          {t('workspace.runNotOnThisSymbol')}
-          {run.symbols[0] && (
-            <button className="btn btn-sm" style={{ marginLeft: 8 }} onClick={() => setChartSymbol(run.symbols[0])}>
-              {t('workspace.chartThisRunsSymbol', { symbol: run.symbols[0] })}
-            </button>
+      {/* Every banner over the chart shares one gutter (.chart-notices) rather
+          than carrying its own inline margin -- with four of them able to
+          stack, the spacing had to be a property of the stack. */}
+      {(Boolean(run && !symbolHasPrice) || failed.length > 0 || starved.length > 0 || hiddenPanes > 0) && (
+        <div className="chart-notices">
+          {run && !symbolHasPrice && (
+            <div className="hint-banner">
+              <Icon name="info" />
+              <span>{t('workspace.runNotOnThisSymbol')}</span>
+              {run.symbols[0] && (
+                <button className="btn btn-sm" onClick={() => setChartSymbol(run.symbols[0])}>
+                  {t('workspace.chartThisRunsSymbol', { symbol: run.symbols[0] })}
+                </button>
+              )}
+            </div>
+          )}
+          {failed.map(({ info, error }) => (
+            <div key={info.key} className="hint-banner warning">
+              <Icon name="alert" />
+              <span>{t('workspace.indicatorFailed', { name: info.label, message: errorMessage(error) })}</span>
+            </div>
+          ))}
+          {starved.length > 0 && (
+            <div className="hint-banner">
+              <Icon name="info" />
+              <span>{t('workspace.indicatorNeedsMoreBars', { names: starved.join(', ') })}</span>
+            </div>
+          )}
+          {hiddenPanes > 0 && (
+            <div className="hint-banner">
+              <Icon name="info" />
+              <span>{t('workspace.tooManyIndicatorPanes', { count: hiddenPanes, max: MAX_SUB_PANES })}</span>
+            </div>
           )}
         </div>
       )}

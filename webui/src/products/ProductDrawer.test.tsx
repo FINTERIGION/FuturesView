@@ -12,6 +12,7 @@ vi.mock('../api/endpoints', () => ({
     exchanges: vi.fn(), bars: vi.fn(), roll: vi.fn(),
   },
   jobsApi: { get: vi.fn(), cancel: vi.fn(), streamUrl: (id: string) => `/api/jobs/${id}/stream` },
+  indicatorsApi: { list: vi.fn(), get: vi.fn(), values: vi.fn(), reload: vi.fn() },
 }))
 
 vi.mock('../components/EChart', () => ({ EChart: () => <div data-testid="chart" /> }))

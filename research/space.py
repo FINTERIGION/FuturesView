@@ -3,7 +3,7 @@
 A strategy's ``space`` declares the range each parameter is *plausible*
 over. Nothing searches it: ``ft.py validate`` steps one notch either side of
 the value in use to see whether the result depends on the exact number, and
-the web panel's parameter editor uses the same bounds to flag a value typed
+the web panel refuses an indicator param override from a URL that falls
 outside them.
 
 Priority, highest first: an explicit override > the strategy's declared
@@ -29,9 +29,8 @@ def spec_to_json(spec: Spec) -> dict:
     """Render one search-space spec as a JSON-safe dict.
 
     Shared by the ``validate`` report (``research.validate``) and the web
-    panel's parameter editor, so both describe a strategy's parameter surface
-    identically -- one had this logic first and the other would otherwise
-    have to duplicate it.
+    panel's strategy and indicator catalogs, so every place a parameter
+    surface is shown describes it identically.
     """
     if isinstance(spec, Int):
         return {'kind': 'int', 'low': spec.low, 'high': spec.high, 'step': spec.step, 'log': spec.log}

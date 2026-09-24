@@ -2,8 +2,8 @@
 
 # Unused here on purpose: this is a template, and the commented
 # `ctx.add_indicator` example in `setup` below needs it the moment
-# anyone uncomments it. A linter will flag it; leave it alone.
-import talib
+# anyone uncomments it. Hence the noqa; leave it alone.
+import talib  # noqa: F401
 
 from .base import Strategy
 

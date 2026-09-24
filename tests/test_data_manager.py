@@ -53,3 +53,24 @@ def test_a_contract_row_with_a_blank_open_is_not_a_print(tmp_path, monkeypatch):
     # The untraded day is dark for the product rather than a day to fill on.
     assert bundle['exec_price_df'].loc[dates[2], 'contract'] == ''
     assert bundle['exec_price_df'].loc[dates[1], 'contract'] == live
+
+
+def test_a_dark_bar_carries_the_last_settle_and_flattens_to_the_last_close():
+    """Nothing traded, so nothing moved: open/high/low collapse onto the
+    carried close, and settle carries its own last value rather than taking
+    the close's -- which used to put a spurious ``close - settle`` step into a
+    settle-to-settle return on the dark day."""
+    days = pd.to_datetime(['2025-03-03', '2025-03-04', '2025-03-05'])
+    frame = pd.DataFrame(
+        {'open': [100.0, 104.0], 'high': [106.0, 108.0], 'low': [99.0, 103.0],
+         'close': [105.0, 107.0], 'settle': [102.0, 106.0], 'oi': [50.0, 60.0],
+         'volume': [10.0, 12.0]},
+        index=days[[0, 2]],
+    )
+    out = DataManager._align_contract_ohlc(frame, days)
+
+    dark = out.loc[days[1]]
+    assert dark['session'] == 0.0
+    assert (dark['open'], dark['high'], dark['low'], dark['close']) == (105.0, 105.0, 105.0, 105.0)
+    assert dark['settle'] == 102.0
+    assert dark['volume'] == 0.0 and dark['oi'] == 50.0

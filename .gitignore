@@ -27,3 +27,15 @@ strategies/*
 !strategies/rsi_mean_reversion.py
 !strategies/my_strategy.py
 !strategies/cross_sectional_momentum.py
+
+# Private indicators: same deal as strategies above
+indicators/*
+!indicators/__init__.py
+!indicators/base.py
+!indicators/ma.py
+!indicators/ema.py
+!indicators/macd.py
+!indicators/rsi.py
+!indicators/bollinger.py
+!indicators/atr.py
+!indicators/my_indicator.py

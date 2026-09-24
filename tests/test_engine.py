@@ -418,6 +418,82 @@ def test_take_profit_rearms_after_a_close_and_reopen():
     assert eng.ledger.trades[-1]['exit_reason'] == 'take_profit'
 
 
+def _flat_rows(n, price=100.0):
+    return {i: (price, price + 1, price - 1, price, price, 0, 10) for i in range(n)}
+
+
+@pytest.mark.parametrize('script, drop_to', [
+    # long + stop@95, close, then a short with no stop of its own: 95 is below
+    # the short's market, so the gap tier used to fill it at the short's open.
+    ({0: (1, 95.0), 2: (0, None), 4: (-1, None)}, None),
+    # the same, reversed in one order rather than through flat
+    ({0: (1, 95.0), 2: (-1, None)}, None),
+    # a reopen on the *same* side after the market fell under the old level
+    ({0: (1, 95.0), 2: (0, None), 4: (1, None)}, 90.0),
+], ids=['reverse-through-flat', 'reverse-in-one-order', 'reopen-below-the-old-level'])
+def test_a_price_stop_does_not_carry_into_the_next_trade(script, drop_to):
+    n = 8
+    rows = _flat_rows(n)
+    if drop_to is not None:
+        rows.update({i: _flat_rows(n, drop_to)[i] for i in range(3, n)})
+    panel = build_panel('SA', n, weighted={'session': [1.0] * n}, contracts={'SA509': rows},
+                        contract_by_bar=['SA509'] * n)
+    eng = Engine(build_market({'SA': panel}, n), _StopScriptedStrategy(script), initial_cash=1_000_000.0)
+    eng.run_backtest(SetupContext, BarContext)
+
+    last = eng.ledger.trades[-1]
+    assert last['exit_reason'] == 'end_of_run', 'the new trade was stopped by the previous one\'s level'
+    assert 'SA' not in eng.stop_spec
+
+
+def test_a_price_stop_set_while_flat_waits_for_a_deferred_entry():
+    # bar0: buy + stop@95 while flat. bar1 is dark, so the entry defers to bar2
+    # -- the spec must survive that flat OPEN rather than be taken for a
+    # finished trade's. bar3 dips to 94 and trips it.
+    n = 5
+    rows = _flat_rows(n)
+    del rows[1]
+    rows[3] = (100.0, 101.0, 94.0, 96.0, 96.0, 0, 10)
+    session = [1.0] * n
+    session[1] = 0.0
+    panel = build_panel('SA', n, weighted={'session': session}, contracts={'SA509': rows},
+                        contract_by_bar=['SA509'] * n)
+    strat = _StopScriptedStrategy({0: (1, 95.0)})
+    eng = Engine(build_market({'SA': panel}, n), strat, initial_cash=1_000_000.0)
+    eng.run_backtest(SetupContext, BarContext)
+
+    trade = eng.ledger.trades[0]
+    assert trade['open_bar'] == 2
+    assert trade['exit_reason'] == 'stop'
+    assert trade['close_price'] == pytest.approx(95.0)
+
+
+def test_a_distance_stop_still_carries_into_the_next_trade():
+    # A distance is relative to whatever position holds it, so unlike a price
+    # it re-arms on a reopen without being set again: 5 under the new entry.
+    n = 7
+    rows = _flat_rows(n)
+    rows[6] = (100.0, 101.0, 94.0, 96.0, 96.0, 0, 10)
+
+    class _DistanceOnce(Strategy):
+        def on_bar(self, ctx):
+            if ctx.i == 0:
+                ctx.set_target('SA', 1)
+                ctx.set_stop('SA', distance=5.0)
+            elif ctx.i == 2:
+                ctx.set_target('SA', 0)
+            elif ctx.i == 4:
+                ctx.set_target('SA', 1)
+
+    panel = build_panel('SA', n, weighted={'session': [1.0] * n}, contracts={'SA509': rows},
+                        contract_by_bar=['SA509'] * n)
+    eng = Engine(build_market({'SA': panel}, n), _DistanceOnce(), initial_cash=1_000_000.0)
+    eng.run_backtest(SetupContext, BarContext)
+
+    assert [t['exit_reason'] for t in eng.ledger.trades] == ['signal', 'stop']
+    assert eng.ledger.trades[-1]['close_price'] == pytest.approx(95.0)
+
+
 def test_set_target_reversal_fills_in_a_single_order():
     n = 4
     contracts = {'SA509': {i: (100 + i, 101 + i, 99 + i, 100 + i, 100 + i, 0, 10) for i in range(n)}}

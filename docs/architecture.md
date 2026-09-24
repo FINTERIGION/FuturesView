@@ -13,6 +13,7 @@ FuturesToolkit/
 │   ├── backtest.py            #   run_single_backtest: one window, engine + metrics
 │   ├── metrics.py             #   performance metrics
 │   ├── indicators.py          #   TA-Lib NaN guard
+│   ├── registry.py            #   folder-scan discovery shared by strategies/ and indicators/
 │   └── params.py              #   Int / Float / Categorical parameter-range types
 ├── strategies/                # Strategy base + examples (tracked) + private modules (gitignored)
 │   ├── base.py                #   Strategy / SetupContext / BarContext
@@ -20,6 +21,10 @@ FuturesToolkit/
 │   ├── rsi_mean_reversion.py
 │   ├── cross_sectional_momentum.py
 │   └── my_strategy.py
+├── indicators/                # Chart indicators -- same deal as strategies/ -- see docs/indicator.md
+│   ├── base.py                #   Indicator / IndicatorContext / Output
+│   ├── ma.py  ema.py  macd.py  rsi.py  bollinger.py  atr.py
+│   └── my_indicator.py
 ├── datafeed/                  # Data pipeline
 │   ├── sources.py             #   per-exchange download & cache adapters (CZCE / SHFE / DCE)
 │   ├── data_update.py         #   OI-weighted aggregation & CSV output (run_updates)
@@ -43,10 +48,11 @@ FuturesToolkit/
 │   ├── data_status.py         #   on-disk coverage per product
 │   ├── serialize.py           #   JSON-safe conversion (inf/NaN/date/numpy)
 │   ├── marketcache.py         #   LRU over research.runner_api.load_market
+│   ├── barscache.py           #   LRU over DataManager.load_dataframe (chart + indicator reads)
 │   ├── static/                #   built frontend (gitignored; `npm run build` writes here)
-│   └── routers/               #   products, data, strategies, backtest, runs, jobs
+│   └── routers/               #   products, data, strategies, indicators, backtest, runs, jobs
 ├── webui/                     # Web panel frontend (Vite + React + TypeScript)
-│   └── src/                   #   api client, ECharts option builders, pages, i18n (en/zh)
+│   └── src/                   #   api client, ECharts option builders, workspace shell, panels, i18n (en/zh)
 ├── tests/                     # pytest suite (synthetic MarketData fixtures)
 ├── data/                      # Generated CSVs (gitignored)
 ├── cache/                     # Raw exchange payloads per venue: cache/{CZCE,SHFE,DCE}/ (gitignored)
@@ -60,3 +66,13 @@ pytest
 ```
 
 Fixtures are synthetic `MarketData`, so the suite runs without any downloaded data.
+
+## Lint
+
+```bash
+pip install -e ".[lint]"
+ruff check .                 # rules in pyproject.toml: correctness only, not style
+cd webui && npm run lint     # oxlint
+```
+
+CI runs both, alongside the tests.

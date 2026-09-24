@@ -1,7 +1,7 @@
 """Performance metrics computed from ``equity_records`` + ``trade_logs``.
 
 Ported from the old ``BacktestEngine._calc_metrics`` (backtrader era), plus
-the additions from docs/rewrite-plan.md §8: annualized return/vol, Sortino,
+the additions listed under Metrics in docs/backtest.md: annualized return/vol, Sortino,
 Calmar, average holding days, capital exposure, turnover, a per-symbol
 breakdown, and forced-liquidation count. The Sharpe/Sortino annualization
 factor is derived from the run's actual bars-per-year instead of a hardcoded

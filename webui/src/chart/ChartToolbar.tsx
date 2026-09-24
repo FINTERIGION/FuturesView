@@ -1,18 +1,13 @@
 import { useTranslation } from 'react-i18next'
-import type { PaneKey } from '../charts/superChartOption'
+import { Icon } from '../components/Icon'
 import { useJobSlot } from '../shell/JobsProvider'
 import { useWorkspace } from '../shell/WorkspaceContext'
-
-const TOGGLABLE: { key: PaneKey; labelKey: string }[] = [{ key: 'volume', labelKey: 'workspace.paneVolume' }]
+import { IndicatorPicker } from './IndicatorPicker'
 
 export function ChartToolbar({ productName }: { productName?: string }) {
   const { t } = useTranslation()
-  const { chartSymbol, panes, setPanes, runId, setRunId } = useWorkspace()
+  const { chartSymbol, runId, setRunId } = useWorkspace()
   const job = useJobSlot('backtest')
-
-  const togglePane = (key: PaneKey) => {
-    setPanes(panes.includes(key) ? panes.filter((p) => p !== key) : [...panes, key])
-  }
 
   /** Leave the backtest view entirely: the run comes off the chart, and the
    * drawer's result tables and finished-job block go with it. Dropping the
@@ -36,17 +31,14 @@ export function ChartToolbar({ productName }: { productName?: string }) {
         </span>
       )}
       <div className="spacer" />
-      {TOGGLABLE.map((p) => (
-        <button
-          key={p.key}
-          className={`btn btn-sm ${panes.includes(p.key) ? 'btn-primary' : ''}`}
-          onClick={() => togglePane(p.key)}
-        >
-          {t(p.labelKey)}
-        </button>
-      ))}
+      {/* Volume used to be a toolbar button of its own, next to this picker.
+          It is a tick inside the picker now: from the reader's side it is one
+          more series on the chart, so "what is drawn here" is one list and
+          one button, not a list plus a stray toggle. */}
+      <IndicatorPicker />
       {runId && (
         <button className="btn btn-sm" onClick={exitBacktest}>
+          <Icon name="close" size={13} />
           {t('workspace.exitBacktest')}
         </button>
       )}

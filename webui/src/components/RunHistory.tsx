@@ -1,10 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { errorMessage } from '../api/client'
 import { runsApi } from '../api/endpoints'
 import type { RunSummary } from '../api/types'
+import { ConfirmDialog } from './ConfirmDialog'
+import { Icon } from './Icon'
 import { Table } from './Table'
 import type { Column } from './Table'
+import { useToast } from './Toast'
 
 function formatMetric(v: unknown): string {
   if (v === null || v === undefined) return '—'
@@ -36,6 +40,11 @@ export function RunHistory({
 }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const toast = useToast()
+  // The run awaiting confirmation. `window.confirm` used to hold this in the
+  // browser's own modal, which blocks the tab -- including the event stream of
+  // any job still running behind it.
+  const [pendingDelete, setPendingDelete] = useState<RunSummary | null>(null)
 
   const { data: runs, isLoading } = useQuery({
     queryKey: ['runs', 'backtest'],
@@ -54,13 +63,8 @@ export function RunHistory({
       // it up would sit on a stale copy of charts nothing can reload.
       onDeleted?.(id)
     },
-    onError: (err) => window.alert(errorMessage(err)),
+    onError: (err) => toast.push({ kind: 'error', title: t('runs.deleteFailed'), message: errorMessage(err) }),
   })
-
-  const deleteRun = (r: RunSummary) => {
-    if (!window.confirm(t('runs.deleteRunConfirm', { strategy: r.strategy ?? r.id }))) return
-    deleteMutation.mutate(r.id)
-  }
 
   // Only a finished run has an artifact to open; a queued/errored one would
   // load into empty charts, so its row is inert.
@@ -90,6 +94,7 @@ export function RunHistory({
     {
       key: 'metric',
       header: t('backtest.metrics.sharpe_ratio'),
+      numeric: true,
       render: (r) => formatMetric(r.metrics?.sharpe_ratio),
     },
     { key: 'created', header: t('runs.created'), render: (r) => new Date(r.created_at * 1000).toLocaleString() },
@@ -101,40 +106,59 @@ export function RunHistory({
       // the deleted run in the results panel on the way out.
       render: (r) => (
         <button
-          className="btn btn-sm btn-danger"
+          className="btn btn-sm btn-danger btn-icon"
+          aria-label={t('common.delete')}
           onClick={(e) => {
             e.stopPropagation()
-            deleteRun(r)
+            setPendingDelete(r)
           }}
           // A running row's job has yet to write its artifact, and the server
           // refuses the delete (409) until it has -- so it is not offered.
           disabled={deleteMutation.isPending || r.status === 'running'}
-          title={r.status === 'running' ? t('runs.deleteRunningHint') : undefined}
+          title={r.status === 'running' ? t('runs.deleteRunningHint') : t('common.delete')}
         >
-          {t('common.delete')}
+          <Icon name="trash" size={14} />
         </button>
       ),
     },
   ]
 
-  if (isLoading) return <div className="empty-state">{t('common.loading')}</div>
+  if (isLoading)
+    return (
+      <div className="empty-state">
+        <span className="spinner" />
+        {t('common.loading')}
+      </div>
+    )
 
+  // The row is the way into the results panel -- there is no View button,
+  // so `row-selectable` is what stops a click that lands beside the Delete
+  // button from selecting the cell text instead.
   return (
-    // The row is the way into the results panel -- there is no View button,
-    // so `row-selectable` is what stops a click that lands beside the Delete
-    // button from selecting the cell text instead.
-    <Table
-      columns={columns}
-      rows={runs ?? []}
-      rowKey={(r) => r.id}
-      emptyMessage={t('runs.noRuns')}
-      onRowClick={(r) => {
-        if (openable(r)) onOpen?.(r)
-      }}
-      rowClassName={(r) =>
-        [openRunId === r.id ? 'row-open' : '', openable(r) ? 'row-selectable' : 'row-static'].filter(Boolean).join(' ')
-      }
-      maxHeight={360}
-    />
+    <>
+      <Table
+        columns={columns}
+        rows={runs ?? []}
+        rowKey={(r) => r.id}
+        emptyMessage={t('runs.noRuns')}
+        onRowClick={(r) => {
+          if (openable(r)) onOpen?.(r)
+        }}
+        rowClassName={(r) =>
+          [openRunId === r.id ? 'row-open' : '', openable(r) ? 'row-selectable' : 'row-static'].filter(Boolean).join(' ')
+        }
+        maxHeight={360}
+      />
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={t('runs.deleteRun')}
+        body={t('runs.deleteRunConfirm', { strategy: pendingDelete?.strategy ?? pendingDelete?.id ?? '' })}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete) deleteMutation.mutate(pendingDelete.id)
+          setPendingDelete(null)
+        }}
+      />
+    </>
   )
 }

@@ -43,7 +43,7 @@ Signals are computed on the OI-weighted series; fills happen on the calendar mai
 - **Still trading** — an ordinary dark day. The roll waits, and orders queued meanwhile stay on the old leg rather than opening a second one on the calendar contract. With the old leg dark they simply defer, exactly as they would on any other dark bar.
 - **Finished printing** — expired, or delisted mid-run. Waiting is waiting forever, so the leg is closed at its carried mark and the exposure moves on. That fill is at a price nobody traded, so the run warns about it and counts it in `stranded_rolls`. A non-zero count usually means the product's `main_months` no longer match where the liquidity is, and the calendar is holding contracts to the end of their life.
 
-**The bracket is re-anchored on the new contract's price scale.** A `distance` is re-resolved against the new leg's `avg_entry`, so the basis cancels. An explicit `price` is shifted by the basis the roll realized, spec included, so a position that later closes and reopens does not re-arm on the stale scale. This is the reason strategies are pointed at distances.
+**The bracket is re-anchored on the new contract's price scale.** A `distance` is re-resolved against the new leg's `avg_entry`, so the basis cancels. An explicit `price` is shifted by the basis the roll realized, spec included, since the resting order is re-armed from the spec on the new contract. This is the reason strategies are pointed at distances.
 
 Costs come from `datafeed/products.py` per product: multiplier, margin ratio, and either `commission_rate` (fraction of notional) or `commission_per_lot`. Long and short are accounted symmetrically.
 

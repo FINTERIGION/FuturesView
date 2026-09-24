@@ -6,8 +6,8 @@ research stack just to say what range a parameter is plausible over. A
 ``space: dict[str, Int | Float | Categorical]`` alongside its existing
 ``params`` defaults. Nothing searches those ranges: ``research.validate``
 steps one notch either side of the value in use to check the result does not
-hinge on the exact number, and the web panel's parameter editor uses the same
-bounds to flag a value typed outside them.
+hinge on the exact number, and the web panel refuses an indicator param
+override from a URL that falls outside them.
 """
 
 from __future__ import annotations

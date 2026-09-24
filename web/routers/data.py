@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from datafeed.data_update import DataUpdate
 from datafeed.products import list_products, normalize_symbol, require_products
 
+from web.barscache import cache as bars_cache
 from web.data_status import coverage_for
 from web.jobs import manager as job_manager
 from web.marketcache import cache as market_cache
@@ -84,8 +85,13 @@ def start_update(body: DataUpdateRequest):
             # symbol permanently unclaimable for the life of the process.
             with _inflight_lock:
                 _inflight.difference_update(symbols)
+            # Also on every exit: a run that fails on its third symbol has
+            # already rewritten the first two's CSVs, and skipping this on the
+            # raise left the panel serving their pre-update frames until the
+            # next *successful* update or a restart.
+            market_cache.invalidate()
+            bars_cache.invalidate()
         job.progress = 1.0
-        market_cache.invalidate()
         return {'symbols': symbols, 'stale': stale}
 
     try:

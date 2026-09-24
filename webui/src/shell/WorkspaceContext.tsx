@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import type { PaneKey } from '../charts/superChartOption'
 import { useStickyState } from '../hooks/useStickyState'
 
 export type DrawerTab = 'backtest' | 'runs'
@@ -13,13 +12,12 @@ export interface BacktestPrefill {
    * into it, so a prefill from a 2-symbol run doesn't leave a 4-symbol
    * universe's other two still checked in. Omitted (not just empty) leaves
    * the charted product and universe alone, for a prefill that has no
-   * symbols of its own to name (e.g. one that only carries tuned params). */
+   * symbols of its own to name. */
   symbols?: string[]
   start: string
   end: string
   cash: number
   slippage: number
-  params: Record<string, unknown>
 }
 
 interface Sequenced<T> {
@@ -65,8 +63,31 @@ interface WorkspaceState {
   sidebarOpen: boolean
   setSidebarOpen: (v: boolean) => void
 
-  panes: PaneKey[]
-  setPanes: (panes: PaneKey[]) => void
+  /** Whether the volume sub-pane is drawn under the candles.
+   *
+   * A plain flag rather than a member of some `panes` list: volume is the
+   * only built-in sub-pane left (equity/position/drawdown moved to the
+   * backtest panel), and every other pane on the chart is derived from
+   * `indicators`. It is ticked from the same picker those are -- see
+   * `chart/IndicatorPicker.tsx` -- but kept out of `indicators` itself so a
+   * user who writes their own `indicators/volume.py` does not collide with
+   * it. */
+  showVolume: boolean
+  setShowVolume: (v: boolean) => void
+
+  /** Keys of the indicators drawn on the chart, in display order.
+   *
+   * Only the *selection* is stored, never the derived `ind:` pane keys.
+   * Whether an indicator draws over the candles or in its own pane is a
+   * property of the Python class, which the user can edit and hot-reload --
+   * persisting that here would be a second source of truth that goes stale
+   * the moment they flip `pane`. `SuperChart` derives the panes from the
+   * live catalog instead.
+   *
+   * Sticky rather than URL-borne: which indicators you like is a preference,
+   * not a fact about the chart worth putting in a shared link. */
+  indicators: string[]
+  toggleIndicator: (key: string) => void
 
   /** The product open in the sidebar's detail (create/edit) view; `'new'`
    * for the create form. `null` means the list view is showing. */
@@ -104,8 +125,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [drawerCollapsed, setDrawerCollapsed] = useStickyState('drawerCollapsed', false)
   const [drawerHeight, setDrawerHeight] = useStickyState('drawerHeight', 360)
   const [sidebarOpen, setSidebarOpen] = useStickyState('sidebarOpen', true)
-  const [panes, setPanes] = useStickyState<PaneKey[]>('panes', ['volume'])
+  const [showVolume, setShowVolume] = useStickyState('showVolume', true)
+  const [indicators, setIndicators] = useStickyState<string[]>('indicators', [])
   const [editingProduct, setEditingProduct] = useState<string | 'new' | null>(null)
+
+  const toggleIndicator = useCallback(
+    (key: string) => {
+      setIndicators(indicators.includes(key) ? indicators.filter((k) => k !== key) : [...indicators, key])
+    },
+    [indicators, setIndicators],
+  )
 
   const runId = searchParams.get('run')
 
@@ -240,8 +269,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setDrawerHeight,
     sidebarOpen,
     setSidebarOpen,
-    panes,
-    setPanes,
+    showVolume,
+    setShowVolume,
+    indicators,
+    toggleIndicator,
     editingProduct,
     setEditingProduct,
     backtestPrefill,
