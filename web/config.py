@@ -23,7 +23,7 @@ DEFAULT_PORT = 8000
 # data files. The browser sends the attacker's hostname in the Host header, so
 # refusing anything but the names the panel is actually served under closes it.
 #
-# `ft.py web` derives FT_WEB_ALLOWED_HOSTS from the bind address when asked to
+# `main.py web` derives FT_WEB_ALLOWED_HOSTS from the bind address when asked to
 # bind somewhere other than loopback, because the Host header is then whatever
 # name the operator reaches the box by and no default here could guess it.
 ALLOWED_HOSTS_ENV = 'FT_WEB_ALLOWED_HOSTS'
@@ -33,7 +33,7 @@ DEFAULT_ALLOWED_HOSTS = ('localhost', '127.0.0.1', '[::1]')
 def allowed_hosts() -> list:
     """Host names this panel will answer to, newest environment wins.
 
-    Read at call time rather than import time so a test (or `ft.py web`
+    Read at call time rather than import time so a test (or `main.py web`
     setting the variable before uvicorn imports the app) can change it.
     Ports are not included: ``host_allowed`` strips the port before matching.
     """

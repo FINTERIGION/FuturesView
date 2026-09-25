@@ -1,4 +1,4 @@
-# Data Pipeline — `python ft.py data`
+# Data Pipeline — `python main.py data`
 
 Downloads history from CZCE, SHFE and DCE, caches the raw payloads, and builds two CSVs per product: contract-level bars for execution, and an open-interest–weighted continuous series for signals.
 
@@ -9,10 +9,10 @@ Downloads history from CZCE, SHFE and DCE, caches the raw payloads, and builds t
 | `--rebuild-only` | Rebuild CSVs from the local cache, no network | off |
 
 ```bash
-python ft.py data                          # incremental refresh, all products
-python ft.py data SA CF                    # selected products
-python ft.py data --force                  # full re-download
-python ft.py data --rebuild-only
+python main.py data                          # incremental refresh, all products
+python main.py data SA CF                    # selected products
+python main.py data --force                  # full re-download
+python main.py data --rebuild-only
 ```
 
 **First run takes about an hour.** CZCE ships one file per year, but SHFE and DCE ship one payload per trading day, so a cold cache is thousands of requests.

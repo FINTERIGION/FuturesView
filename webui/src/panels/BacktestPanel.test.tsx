@@ -1,13 +1,14 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ApiError } from '../api/client'
 import { backtestApi, indicatorsApi, runsApi, strategiesApi } from '../api/endpoints'
 import { INDICATORS, STRATEGIES, renderWorkspace } from '../test/utils'
 import type { BacktestFieldsPrefill } from './BacktestPanel'
 import { BacktestPanel } from './BacktestPanel'
 
 vi.mock('../api/endpoints', () => ({
-  strategiesApi: { list: vi.fn() },
+  strategiesApi: { list: vi.fn(), reload: vi.fn() },
   backtestApi: { start: vi.fn() },
   runsApi: { list: vi.fn(), get: vi.fn(), price: vi.fn(), remove: vi.fn() },
   jobsApi: { get: vi.fn(), cancel: vi.fn(), streamUrl: (id: string) => `/api/jobs/${id}/stream` },
@@ -137,6 +138,58 @@ describe('a strategy whose file failed to load', () => {
 
     await screen.findByText(/was never closed/)
     expect(screen.getByRole('button', { name: /run backtest/i })).toBeDisabled()
+  })
+})
+
+describe('the reload button', () => {
+  const RENAMED = { ...STRATEGIES[0], key: 'double_ma_v2', class_name: 'DoubleMaV2Strategy' }
+
+  it('re-imports strategies/ and refetches the dropdown', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem('ft.strategy', JSON.stringify('double_ma'))
+    renderPanel()
+    await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('double_ma'))
+
+    vi.mocked(strategiesApi.list).mockResolvedValue([...STRATEGIES, RENAMED])
+    vi.mocked(strategiesApi.reload).mockResolvedValue({
+      reloaded: true, strategies: [...STRATEGIES, RENAMED].map((s) => s.key), failed: {},
+    })
+    await user.click(screen.getByRole('button', { name: /^reload$/i }))
+
+    expect(strategiesApi.reload).toHaveBeenCalledTimes(1)
+    expect(await screen.findByRole('option', { name: 'double_ma_v2' })).toBeInTheDocument()
+    expect(screen.getByText(/reloaded 3 strategies/i)).toBeInTheDocument()
+  })
+
+  it('moves off a pick whose class the reload removed', async () => {
+    // Renaming the class renames its key. Left on the stale key, the select
+    // showed another strategy while the run sent the one that is gone.
+    const user = userEvent.setup()
+    localStorage.setItem('ft.strategy', JSON.stringify('double_ma'))
+    renderPanel()
+    await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('double_ma'))
+
+    const after = [RENAMED, ...STRATEGIES.slice(1)]
+    vi.mocked(strategiesApi.list).mockResolvedValue(after)
+    vi.mocked(strategiesApi.reload).mockResolvedValue({
+      reloaded: true, strategies: after.map((s) => s.key), failed: {},
+    })
+    await user.click(screen.getByRole('button', { name: /^reload$/i }))
+
+    await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('double_ma_v2'))
+  })
+
+  it("says why when the server refuses, and keeps the list it had", async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await screen.findByRole('option', { name: 'double_ma' })
+
+    vi.mocked(strategiesApi.reload).mockRejectedValue(new ApiError(409, 'A job is running'))
+    await user.click(screen.getByRole('button', { name: /^reload$/i }))
+
+    expect(await screen.findByText(/could not reload strategies/i)).toBeInTheDocument()
+    expect(screen.getByText(/a job is running/i)).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'double_ma' })).toBeInTheDocument()
   })
 })
 

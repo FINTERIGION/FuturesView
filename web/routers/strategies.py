@@ -1,4 +1,4 @@
-"""Strategy catalog: params, tunable search space, and a hot-reload hook so
+"""Strategy catalog: params, declared param ranges, and a hot-reload hook so
 a strategy edited in the editor (the private, gitignored modules under
 ``strategies/``) appears without restarting the server.
 """
@@ -10,7 +10,7 @@ import inspect
 from fastapi import APIRouter, HTTPException
 
 from core.registry import reload_package
-from research.space import resolve_space, spec_to_json
+from core.params import resolve_space, spec_to_json
 from strategies import Strategy, discover_strategies, load_registered_strategy
 
 from web.jobs import manager as job_manager

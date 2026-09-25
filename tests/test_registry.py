@@ -166,6 +166,22 @@ def test_save_registry_round_trips_through_disk(tmp_path):
     assert reloaded['ZZ']['main_months'] == (1, 5, 9)
 
 
+def test_save_registry_writes_commission_rate_in_scientific_notation(tmp_path):
+    path = tmp_path / 'products.json'
+    base = {k: v for k, v in _VALID.items() if k != 'commission_per_lot'}
+    save_registry({
+        'AA': dict(base, commission_rate=0.0001),
+        'BB': dict(base, commission_rate=0.00005),
+        'CC': dict(base, commission_rate=0.00015),
+    }, path=str(path))
+
+    text = path.read_text(encoding='utf-8')
+    assert '"commission_rate": 1e-04' in text
+    assert '"commission_rate": 5e-05' in text
+    assert '"commission_rate": 1.5e-04' in text      # no precision lost
+    assert _load_registry(str(path))['CC']['commission_rate'] == 0.00015
+
+
 def test_save_registry_rejects_an_invalid_entry_and_writes_nothing(tmp_path):
     path = tmp_path / 'products.json'
     original = {'ZZ': _VALID}

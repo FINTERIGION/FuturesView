@@ -32,21 +32,16 @@ class Strategy:
     dict of defaults; instantiate with ``MyStrategy(**overrides)``.
 
     ``space`` optionally declares the range each param is plausible over:
-    ``{param_name: Int(...) | Float(...) | Categorical(...)}``. Nothing
-    searches it -- ``ft.py validate`` steps one notch either side of the value
-    in use to see whether the result depends on the exact number. Params
-    not listed in ``space`` and not in ``fixed_params`` get a heuristic range
-    inferred from their default value (see ``research.space.resolve_space``).
-    ``fixed_params`` lists params that should never be perturbed (position
-    sizing, risk knobs, etc.). ``constraints`` is a tuple of
-    ``callable(params_dict) -> bool``; a perturbed set that fails any
-    constraint is skipped rather than run.
+    ``{param_name: Int(...) | Float(...) | Categorical(...)}``; the web
+    panel's strategy catalog lists it. Params not listed in ``space`` and not
+    in ``fixed_params`` get a heuristic range inferred from their default value
+    (see ``core.params.resolve_space``). ``fixed_params`` lists params that
+    have no meaningful range (position sizing, risk knobs, etc.).
     """
 
     params: dict = {}
     space: dict = {}
     fixed_params: tuple = ('lots',)
-    constraints: tuple = ()
 
     def __init__(self, **overrides):
         self.p = {**type(self).params, **overrides}

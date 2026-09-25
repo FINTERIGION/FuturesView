@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { errorMessage } from '../api/client'
@@ -62,6 +62,22 @@ export function BacktestPanel({ prefill }: { prefill?: BacktestFieldsPrefill }) 
 
   const { data: strategies } = useQuery({ queryKey: ['strategies'], queryFn: strategiesApi.list })
 
+  // Re-imports strategies/ on the server so an edited file shows up without a
+  // restart. Broken modules need no separate report here: the refetched
+  // catalog lists them disabled with their error, below the dropdown.
+  const reloadStrategies = useMutation({
+    mutationFn: strategiesApi.reload,
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ['strategies'] })
+      toast.push({ kind: 'success', title: t('backtest.reloadedStrategies', { count: data.strategies.length }) })
+    },
+    // Mostly the server's 409: it refuses while any job is running, since
+    // swapping a class object mid-run would pull it out from under the job.
+    onError: (err) => {
+      toast.push({ kind: 'error', title: t('backtest.reloadStrategiesFailed'), message: errorMessage(err) })
+    },
+  })
+
   const [strategyKey, setStrategyKey] = useStickyState('strategy', sharedFormDefaults.strategy, initialPrefill?.strategy)
   const [start, setStart] = useStickyState('start', sharedFormDefaults.start, initialPrefill?.start)
   const [end, setEnd] = useStickyState('end', sharedFormDefaults.end, initialPrefill?.end)
@@ -74,9 +90,13 @@ export function BacktestPanel({ prefill }: { prefill?: BacktestFieldsPrefill }) 
   // they wait for a job.
   const slippageValid = slippage >= 0
 
+  // Also covers a pick that is no longer in the catalog -- a class renamed or
+  // deleted and then reloaded. Left alone, the select would show the first
+  // option while the run sent the stale key and failed on the server.
   useEffect(() => {
     const firstRunnable = strategies?.find((s) => s.errors.length === 0)
-    if (firstRunnable && !strategyKey) {
+    const missing = strategies !== undefined && !strategies.some((s) => s.key === strategyKey)
+    if (firstRunnable && (!strategyKey || missing)) {
       setStrategyKey(firstRunnable.key)
     }
   }, [strategies, strategyKey, setStrategyKey])
@@ -178,6 +198,9 @@ export function BacktestPanel({ prefill }: { prefill?: BacktestFieldsPrefill }) 
           strategies={strategies ?? []}
           strategyKey={strategyKey}
           onStrategyChange={setStrategyKey}
+          onReloadStrategies={() => reloadStrategies.mutate()}
+          reloadingStrategies={reloadStrategies.isPending}
+          canReloadStrategies={!job.isActive}
           universe={universe}
           start={start}
           onStartChange={setStart}

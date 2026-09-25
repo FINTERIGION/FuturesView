@@ -15,7 +15,6 @@ class DoubleMaStrategy(Strategy):
 
     params = {'fast_period': 5, 'slow_period': 20, 'lots': 1}
     space = {'fast_period': Int(3, 30), 'slow_period': Int(20, 150)}
-    constraints = (lambda p: p['fast_period'] < p['slow_period'],)
 
     def setup(self, ctx):
         for sym in ctx.symbols:

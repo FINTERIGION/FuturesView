@@ -28,6 +28,9 @@ export function BacktestForm({
   strategies,
   strategyKey,
   onStrategyChange,
+  onReloadStrategies,
+  reloadingStrategies,
+  canReloadStrategies,
   universe,
   start,
   onStartChange,
@@ -42,6 +45,9 @@ export function BacktestForm({
   strategies: StrategyInfo[]
   strategyKey: string
   onStrategyChange: (key: string) => void
+  onReloadStrategies: () => void
+  reloadingStrategies: boolean
+  canReloadStrategies: boolean
   universe: string[]
   start: string
   onStartChange: (v: string) => void
@@ -62,13 +68,24 @@ export function BacktestForm({
     <>
       <div className="field">
         <label>{t('common.strategy')}</label>
-        <select value={strategyKey} onChange={(e) => onStrategyChange(e.target.value)}>
-          {strategies.map((s) => (
-            <option key={s.key} value={s.key} disabled={s.errors.length > 0}>
-              {s.errors.length > 0 ? `${s.key} (${t('backtest.strategyBroken')})` : s.key}
-            </option>
-          ))}
-        </select>
+        <div className="field-row">
+          <select value={strategyKey} onChange={(e) => onStrategyChange(e.target.value)}>
+            {strategies.map((s) => (
+              <option key={s.key} value={s.key} disabled={s.errors.length > 0}>
+                {s.errors.length > 0 ? `${s.key} (${t('backtest.strategyBroken')})` : s.key}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="btn"
+            disabled={!canReloadStrategies || reloadingStrategies}
+            onClick={onReloadStrategies}
+            title={t('backtest.reloadStrategiesHint')}
+          >
+            {reloadingStrategies ? t('common.loading') : t('backtest.reloadStrategies')}
+          </button>
+        </div>
         {broken.length > 0 && (
           <div className="field-error">
             {t('backtest.strategyBrokenHint')}

@@ -28,9 +28,16 @@ from indicators.base import (
     output_json,
     value_range_json,
 )
-from research.space import check_constraints, parse_param_value, resolve_space, spec_to_json
 
-from core.params import Categorical, Float, Int
+from core.params import (
+    Categorical,
+    Float,
+    Int,
+    check_constraints,
+    parse_param_value,
+    resolve_space,
+    spec_to_json,
+)
 from core.registry import reload_package
 
 from web.barscache import cache as bars_cache
@@ -210,7 +217,7 @@ def _coerce(name: str, default, spec, value):
     The range check is the load-bearing part: ``period=99999999999`` reaching
     ``talib.SMA`` is the only real way to hurt this process from a URL, and the
     bound is already declared on the class as ``space``. Where a param declared
-    none, ``research.space._infer_spec`` supplies ``value/4 .. value*4``, which
+    none, ``core.params._infer_spec`` supplies ``value/4 .. value*4``, which
     is a perfectly sane cap for a chart request.
     """
     if isinstance(default, bool):
@@ -278,7 +285,7 @@ def _overrides(cls: type, raw_list: list) -> dict:
     The token is literally the ``--param name=value`` CLI token and goes
     through the same ``parse_param_value``, so the two paths cannot drift in
     how they cast a value. What differs is what happens to an *unknown* name:
-    ``research.space.resolve_params`` warns and passes it through, which is
+    ``core.params.resolve_params`` warns and passes it through, which is
     right for an argv already running as the user, but over HTTP an unknown key
     is a typo or a probe -- and ``self.p = {**params, **overrides}`` would land
     it in a dict the user's ``compute()`` reads.

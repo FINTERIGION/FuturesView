@@ -1,11 +1,11 @@
-"""LRU cache over ``research.runner_api.load_market``.
+"""LRU cache over ``load_market``.
 
 ``load_market`` re-reads every symbol's CSV from disk on every call, which is
 fine for a CLI run (one call, then the process exits) but not for a panel
 where a user tries several strategies against the same universe/date range
-back to back. ``MarketData`` is documented as a read-only, shareable object
-(see ``research/runner_api.py``), so caching it here is safe for the same
-reason it is safe to share across one validation run's walk-forward folds.
+back to back. Nothing downstream writes to a ``MarketData`` -- the engine,
+strategies and indicators only read it -- so one cached object can be shared
+across requests.
 """
 
 from __future__ import annotations
@@ -15,14 +15,23 @@ import threading
 from collections import OrderedDict
 from typing import Tuple
 
-from core.market import MarketData
-from research.runner_api import load_market
+from core.market import MarketData, build_market_data
+from datafeed.data_manager import DataManager
+from datafeed.products import require_products
 
 from web.config import MARKET_CACHE_SIZE
 
-logger = logging.getLogger('futurestoolkit.web')
+logger = logging.getLogger('futuresview.web')
 
 _Key = Tuple[Tuple[str, ...], str, str]
+
+
+def load_market(symbols, start: str, end: str, update: bool = False) -> MarketData:
+    """Build the ``MarketData`` for ``symbols`` over ``[start, end]`` from disk."""
+    resolved = require_products(symbols)
+    dm = DataManager(symbols=resolved, update=update)
+    universe = dm.get_universe_bundle(start_date=start, end_date=end)
+    return build_market_data(universe)
 
 
 class MarketCache:
@@ -40,7 +49,7 @@ class MarketCache:
         A sorted key handed ``[CF, SA]`` whatever ``[SA, CF]`` had cached, so
         one request could backtest differently depending on what ran before
         it. Keyed on order, a request always gets the order it asked for --
-        the same answer ``ft.py backtest`` gives for that ``--symbols``.
+        the same answer ``main.py backtest`` gives for that ``--symbols``.
         """
         return (tuple(symbols), str(start), str(end))
 

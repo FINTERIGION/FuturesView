@@ -2,7 +2,7 @@
 
 Thin wrapper over ``core.backtest.run_single_backtest`` -- no plotting, no
 file writes beyond the run-history artifact -- the same function the
-``ft.py backtest`` CLI already uses.
+``main.py backtest`` CLI already uses.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from web.schemas import BacktestRequest
 from web.serialize import annotate_inf_metrics
 
 router = APIRouter(prefix='/api', tags=['backtest'])
-logger = logging.getLogger('futurestoolkit.web')
+logger = logging.getLogger('futuresview.web')
 
 
 def _build_artifact(market, symbols, result: dict) -> dict:

@@ -88,7 +88,7 @@ def _to_csv_atomic(df: pd.DataFrame, path: str) -> None:
     the same target open the same temp file, one ``os.replace`` wins, and the
     loser either writes its tail into the winner's already-renamed inode or
     dies on ``FileNotFoundError`` partway through. The web panel de-duplicates
-    downloads by product, but only its own -- a ``python ft.py data SA`` in a
+    downloads by product, but only its own -- a ``python main.py data SA`` in a
     terminal while the panel updates SA is two processes on this exact path.
 
     Cleanup is a ``finally`` so a failed ``to_csv`` (or a Ctrl-C mid-write)
@@ -225,7 +225,7 @@ class DataUpdate:
 def run_updates(symbols=None, *, force: bool = False, rebuild_only: bool = False) -> None:
     """Refresh every symbol in ``symbols`` (default: every registered product).
 
-    The one implementation behind both entry points -- ``ft.py data`` and
+    The one implementation behind both entry points -- ``main.py data`` and
     ``python -m datafeed.data_update`` -- so the partial-failure contract
     below is stated once. Raises ``SystemExit`` if any product failed or came
     back stale.
@@ -265,7 +265,7 @@ def run_updates(symbols=None, *, force: bool = False, rebuild_only: bool = False
 def add_cli_args(parser) -> None:
     """Declare the download flags on ``parser``.
 
-    Shared with ``ft.py`` so the two entry points cannot drift apart on flag
+    Shared with ``main.py`` so the two entry points cannot drift apart on flag
     names or help text.
     """
     parser.add_argument(

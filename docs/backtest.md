@@ -1,9 +1,9 @@
-# Backtesting — `ft.py backtest`
+# Backtesting — `main.py backtest`
 
 Runs one strategy over a date range and writes a trade log, five charts and a metrics summary.
 
 ```bash
-python ft.py backtest --symbols SA CF RB --start 2020-01-01 --end 2026-12-31 --strategy double_ma --cash 200000
+python main.py backtest --symbols SA CF RB --start 2020-01-01 --end 2026-12-31 --strategy double_ma --cash 200000
 ```
 
 ## Flags
@@ -16,7 +16,6 @@ python ft.py backtest --symbols SA CF RB --start 2020-01-01 --end 2026-12-31 --s
 | `--strategy` | A discovered short name (`--help` lists them), or a `module.path:ClassName` reference to a strategy outside this repo | `double_ma` |
 | `--slippage` | Fill slippage in ticks, applied against the order | `0` |
 | `--lots` | Lots per trade, for strategies that expose it | `1` |
-| `--params-from` | Load params from a `validate` `*_validation.json` report | — |
 | `--param NAME=VALUE` | Override one param; repeatable | — |
 | `--update-data` | Refresh exchange data before running | off |
 | `--results-dir` | Output directory | `results/` |

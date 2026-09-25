@@ -18,7 +18,6 @@ class RsiMeanReversionStrategy(Strategy):
         'oversold': Int(10, 40),
         'overbought': Int(60, 90),
     }
-    constraints = (lambda p: p['oversold'] < p['overbought'],)
 
     def setup(self, ctx):
         for sym in ctx.symbols:

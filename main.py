@@ -1,14 +1,12 @@
 """
-FuturesToolkit CLI -- the single entry point for the whole toolkit.
+FuturesView CLI -- the single entry point for the whole toolkit.
 
 Usage (from the repo root):
-  python ft.py data SA CF RB                     # download / rebuild exchange history
-  python ft.py backtest --strategy double_ma     # run a backtest, write charts + trade log
-  python ft.py show-space --strategy double_ma   # print a strategy's parameter ranges
-  python ft.py validate --strategy double_ma     # overfitting checks on those parameters
-  python ft.py web                               # serve the browser panel
+  python main.py data SA CF RB                     # download / rebuild exchange history
+  python main.py backtest --strategy double_ma     # run a backtest, write charts + trade log
+  python main.py web                               # serve the browser panel
 
-Run ``python ft.py <subcommand> --help`` for each command's full flag list.
+Run ``python main.py <subcommand> --help`` for each command's full flag list.
 """
 
 from __future__ import annotations
@@ -18,7 +16,6 @@ import csv
 import datetime
 import glob
 import logging
-import math
 import os
 import re
 import socket
@@ -40,7 +37,7 @@ DEFAULT_CASH = 200_000.0
 DEFAULT_SLIPPAGE = 0.0
 DEFAULT_STRATEGY = 'double_ma'
 
-logger = logging.getLogger('futurestoolkit.cli')
+logger = logging.getLogger('futuresview.cli')
 
 
 def _strategy_names() -> list:
@@ -206,7 +203,7 @@ def cmd_backtest(args) -> dict:
     from core.market import build_market_data
     from datafeed.data_manager import DataManager
     from plotting import BacktestPlotter
-    from research.space import resolve_params
+    from core.params import resolve_params
 
     symbols = require_products(args.symbols)
     strategy_cls = _load_strategy(args.strategy)
@@ -214,7 +211,7 @@ def cmd_backtest(args) -> dict:
     strategy_name = strategy_cls.__name__
 
     logger.info('=' * 60)
-    logger.info('  FuturesToolkit Backtest')
+    logger.info('  FuturesView Backtest')
     logger.info('  Products : %s', ', '.join(symbols))
     logger.info('  Strategy : %s  [%s -> %s]', strategy_name, args.start, args.end)
     logger.info('  Slippage : %s', 'off' if not args.slippage else f'{args.slippage:g} ticks')
@@ -260,266 +257,6 @@ def cmd_backtest(args) -> dict:
     logger.info('=' * 60)
 
     return {'result': result, 'metrics': metrics, 'chart_paths': chart_paths, 'log_path': log_path}
-
-
-# ---------------------------------------------------------------------
-# show-space
-# ---------------------------------------------------------------------
-
-def cmd_show_space(args) -> None:
-    from research.space import resolve_space
-
-    strategy_cls = _load_strategy(args.strategy)
-    space = resolve_space(strategy_cls)
-    print(f'{strategy_cls.__name__} parameter ranges:')
-    for name, spec in space.items():
-        print(f'  {name}: {spec}')
-    fixed = set(getattr(strategy_cls, 'fixed_params', ()) or ())
-    unscanned = [k for k in (strategy_cls.params or {}) if k not in space and k not in fixed]
-    if fixed:
-        print(f'  (fixed, never perturbed: {sorted(fixed)})')
-    if unscanned:
-        print(f'  (no range could be inferred, left at default: {unscanned})')
-
-
-# ---------------------------------------------------------------------
-# validate
-# ---------------------------------------------------------------------
-
-def _fmt(value, spec: str = '.4f', width: int = 8) -> str:
-    """Format a number that may legitimately be NaN or None.
-
-    Every check can decline to answer -- a window too short to bootstrap, a
-    dimension whose neighbours the strategy's constraints rule out -- and
-    printing 0.0000 for those would claim a result the tool does not have.
-    """
-    if value is None or (isinstance(value, float) and math.isnan(value)):
-        return f"{'n/a':>{width}}"
-    return f'{value:>{width}{spec}}'
-
-
-def _print_walkforward(check: dict) -> list:
-    lines = ['  Walk-forward consistency', '  ' + '-' * 56,
-             f"  {'window':<12}{'sharpe':>9}{'trades':>8}{'maxDD%':>9}{'score':>9}"]
-    for row in check['train'] + check['valid']:
-        lines.append(
-            f"  {row['name']:<12}{_fmt(row['sharpe_ratio'], '.2f', 9)}"
-            f"{row['n_trades']:>8}{_fmt(row['max_drawdown'], '.1f', 9)}"
-            f"{_fmt(row['score'], '.2f', 9)}"
-        )
-    decay = check['decay']
-    lines.append(
-        f"  mean IS {_fmt(decay['is_score'], '.2f', 6)}   mean OOS "
-        f"{_fmt(decay['oos_score'], '.2f', 6)}   ratio {_fmt(decay['ratio'], '.2f', 6)}"
-    )
-    return lines
-
-
-def _print_subperiod(check: dict) -> list:
-    lines = ['  Sub-period stability', '  ' + '-' * 56,
-             f"  {'period':<12}{'sharpe':>9}{'trades':>8}{'maxDD%':>9}{'return%':>10}"]
-    for row in check['periods']:
-        lines.append(
-            f"  {row['name']:<12}{_fmt(row['sharpe_ratio'], '.2f', 9)}"
-            f"{row['n_trades']:>8}{_fmt(row['max_drawdown'], '.1f', 9)}"
-            f"{_fmt(row['total_return'], '.1f', 10)}"
-        )
-    worst = check['worst_period']
-    if worst:
-        lines.append(
-            f"  worst: {worst['name']} at sharpe {worst['sharpe_ratio']:.2f}   "
-            f"positive periods: {check['positive_fraction'] * check['n_periods']:.0f}"
-            f"/{check['n_periods']}"
-        )
-    return lines
-
-
-def _print_sensitivity(check: dict) -> list:
-    lines = ['  Parameter sensitivity', '  ' + '-' * 56,
-             f"  {'param':<24}{'max drop%':>12}{'verdict':>14}"]
-    for name, dim in sorted(check['dimensions'].items()):
-        if not dim.get('evaluated'):
-            verdict = 'not measured'
-        elif dim['flags_spike']:
-            verdict = 'SPIKE'
-        elif dim['max_drop_pct'] < -10.0:
-            # A negative drop means a neighbour scored *better*, so this value
-            # is not even the local best. Worth saying plainly rather than
-            # printing a minus sign next to the word "flat": it is the
-            # opposite of the failure this check looks for.
-            verdict = 'off-peak'
-        else:
-            verdict = 'flat'
-        drop = dim['max_drop_pct'] if dim.get('evaluated') else None
-        lines.append(f"  {name:<24}{_fmt(drop, '.1f', 12)}{verdict:>14}")
-    lines.append(f"  base score {check['base_score']:.4f}")
-    if check['unmeasured']:
-        lines.append(
-            f"  {len(check['unmeasured'])} dimension(s) had no measurable neighbour: "
-            f"{', '.join(check['unmeasured'])}"
-        )
-    return lines
-
-
-def _print_bootstrap(check: dict) -> list:
-    lines = ['  Block bootstrap', '  ' + '-' * 56]
-    if check['insufficient']:
-        lines.append(f"  Not run: {check['n_obs']} bars is too short for block={check['block']}.")
-        return lines
-    sharpe, dd = check['sharpe'], check['max_drawdown']
-    lines += [
-        f"  {check['n_draws']} draws, block={check['block']} bars",
-        f"  sharpe        point {_fmt(sharpe['point'], '.2f', 7)}",
-        f"                95% CI[{_fmt(sharpe['ci_low'], '.2f', 7)},{_fmt(sharpe['ci_high'], '.2f', 7)} ]",
-        f"                P(SR>0){_fmt(sharpe['p_positive'], '.3f', 7)}",
-        f"  max drawdown  observed {_fmt(dd['observed'], '.1f', 6)}%   "
-        f"median {_fmt(dd['median'], '.1f', 6)}%   95th {_fmt(dd['p95'], '.1f', 6)}%",
-    ]
-    return lines
-
-
-def _print_contribution(metrics: dict) -> list:
-    """Net P&L per product, straight off the full-sample run.
-
-    Not one of the checks and not flagged -- every check above reads the
-    portfolio equity curve, which is one axis: time. This is the other axis,
-    and it is free to print because ``compute_metrics`` already computed it.
-    A "multi-product" strategy whose total is one product's P&L with noise
-    stapled to it passes every time-axis check there is, so the numbers have
-    to at least be visible.
-    """
-    by_symbol = metrics.get('by_symbol') or {}
-    if not by_symbol:
-        return []
-    rows = sorted(by_symbol.items(), key=lambda kv: kv[1]['net_pnl'], reverse=True)
-    total = sum(abs(stats['net_pnl']) for _, stats in rows) or 1.0
-    lines = ['  Per-product contribution (not a check)', '  ' + '-' * 56,
-             f"  {'product':<10}{'trades':>8}{'net P&L':>16}{'share':>9}"]
-    for symbol, stats in rows:
-        lines.append(
-            f"  {symbol:<10}{stats['n_trades']:>8}{stats['net_pnl']:>16,.0f}"
-            f"{abs(stats['net_pnl']) / total * 100:>8.0f}%"
-        )
-    losers = [s for s, st in rows if st['net_pnl'] < 0]
-    if losers:
-        lines.append(f"  Losing products: {', '.join(losers)}")
-    return lines
-
-
-def _print_selection(checks: dict) -> list:
-    lines = ['  Selection-bias corrections', '  ' + '-' * 56]
-    if 'pbo' in checks:
-        pbo = checks['pbo']
-        lines.append(
-            f"  PBO (CSCV)        {_fmt(pbo['pbo'], '.3f', 7)}   over "
-            f"{pbo['n_combinations']} split(s) of {pbo['n_blocks']} block(s)"
-        )
-    if 'dsr' in checks:
-        dsr = checks['dsr']
-        declared = 'declared' if dsr.get('trials_declared') else 'grid size'
-        lines += [
-            f"  Deflated Sharpe   {_fmt(dsr['dsr'], '.3f', 7)}   "
-            # Per *bar*, and said so: these are the raw ratios the deflation
-            # works on, an annualization factor away from every other Sharpe
-            # in this report.
-            f"sr_hat {_fmt(dsr.get('sr_hat'), '.3f', 6)}  sr0 "
-            f"{_fmt(dsr.get('sr0'), '.3f', 6)}  (per bar)",
-            f"                    n_trials={dsr.get('n_trials')} ({declared}), "
-            f"candidates={dsr.get('n_candidates')}",
-        ]
-    if 'pbo' in checks:
-        lines += [
-            '  Candidates are a one-step neighbourhood, not a search, so PBO reads',
-            '  narrower than the same statistic over independently tried configurations.',
-        ]
-    return lines
-
-
-_VERDICTS = {
-    'walkforward': 'out-of-sample folds keep less than half the in-sample score',
-    'subperiod': 'the worst sub-period loses money and under half of them are positive',
-    'sensitivity': 'at least one parameter is a lone spike rather than a plateau',
-    'bootstrap': 'resampling cannot rule out a true Sharpe of zero at 95%',
-    'pbo': 'an in-sample pick among the neighbours usually fails out of sample',
-    'dsr': 'the Sharpe does not survive correction for how many configurations were tried',
-}
-
-
-def _print_validation(report: dict, path: str) -> None:
-    sep = '=' * 60
-    lines = [sep, f"  Overfitting Report -- {report['strategy']}", sep,
-             f"  Products  : {', '.join(report['symbols'])}",
-             f"  Params    : {report['params']}",
-             f"  Window    : bars [{report['evaluation_window']['start']}, "
-             f"{report['evaluation_window']['end']}) of {report['n_bars']}",
-             f"  Full-sample sharpe {report['full_metrics'].get('sharpe_ratio', 0):.4f}  "
-             f"trades {report['full_metrics'].get('n_trades', 0)}  "
-             f"maxDD {report['full_metrics'].get('max_drawdown', 0):.2f}%",
-             sep]
-
-    checks = report['checks']
-    printers = (
-        ('walkforward', _print_walkforward), ('subperiod', _print_subperiod),
-        ('sensitivity', _print_sensitivity), ('bootstrap', _print_bootstrap),
-    )
-    for key, printer in printers:
-        if key in checks:
-            lines += printer(checks[key]) + [sep]
-    if 'pbo' in checks or 'dsr' in checks:
-        lines += _print_selection(checks) + [sep]
-    contribution = _print_contribution(report['full_metrics'])
-    if contribution:
-        lines += contribution + [sep]
-
-    flags = report['flags']
-    if flags:
-        lines.append(f'  *** {len(flags)} CHECK(S) FLAGGED ***')
-        for name in flags:
-            lines.append(f'  - {name}: {_VERDICTS[name]}')
-    else:
-        lines.append('  No check flagged. That is not a pass -- it is the absence of')
-        lines.append('  these particular failures on this particular history.')
-    if report['skipped']:
-        lines.append(f"  Skipped: {', '.join(report['skipped'])}")
-    lines += [sep, f'  Report: {path}', sep]
-    logger.info('\n'.join(lines))
-
-
-def cmd_validate(args) -> dict:
-    from research.space import resolve_params
-    from research.validate import validate_strategy
-
-    strategy_cls = _load_strategy(args.strategy)
-    symbols = require_products(args.symbols)
-    params = resolve_params(strategy_cls, args)
-
-    out = validate_strategy(
-        strategy_cls=strategy_cls,
-        symbols=symbols,
-        params=params,
-        start=args.start,
-        end=args.end,
-        cash=args.cash,
-        slippage=args.slippage,
-        n_folds=args.n_folds,
-        embargo=args.embargo,
-        holdout_frac=args.holdout_frac,
-        n_periods=args.n_periods,
-        trials_tried=args.trials_tried,
-        bootstrap_draws=args.bootstrap_draws,
-        bootstrap_block=args.bootstrap_block,
-        seed=args.seed,
-        skip=tuple(args.skip or ()),
-        results_dir=args.results_dir,
-        update_data=args.update_data,
-    )
-    _print_validation(out['report'], out['path'])
-    print(f"Replay it with the full trade log and charts: "
-          f"python ft.py backtest --strategy {args.strategy} --params-from {out['path']}")
-
-    if args.fail_on_warn and out['report']['flags']:
-        sys.exit(1)
-    return out
 
 
 # ---------------------------------------------------------------------
@@ -635,24 +372,9 @@ def _add_data_args(p) -> None:
                     help='Refresh exchange data before running')
 
 
-def _add_split_args(p) -> None:
-    p.add_argument('--n-folds', type=int, default=4,
-                    help='Anchored walk-forward folds (default: %(default)s)')
-    p.add_argument('--embargo', type=int, default=10,
-                    help='Bars dropped between each train window and its valid window')
-    # 0.0, not the 0.20 the deleted search used. Holding a window back protects
-    # it from *selection*, and nothing here selects: the parameters arrive
-    # already chosen. Reserving a tail would only shorten the folds and hide
-    # the most recent stretch, which is the one worth seeing.
-    p.add_argument('--holdout-frac', type=float, default=0.0,
-                    help='Trailing fraction excluded from the folds entirely '
-                         '(default: %(default)s -- the folds span all history)')
-    p.add_argument('--seed', type=int, default=42)
-
-
 def _parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog='ft.py', description='FuturesToolkit: data, backtesting, and overfitting checks.',
+        prog='main.py', description='FuturesView: data, backtesting, and a web panel.',
     )
     verbosity = parser.add_mutually_exclusive_group()
     verbosity.add_argument('--quiet', action='store_true')
@@ -672,60 +394,12 @@ def _parse_args(argv=None) -> argparse.Namespace:
     _add_data_args(p)
     p.add_argument('--lots', type=int, default=None,
                     help='Lots per trade (strategies that use it); default 1')
-    p.add_argument('--params-from', default=None,
-                    help="Load strategy params from an `ft.py validate` "
-                         "'*_validation.json' report, so a checked parameter set can be "
-                         'run here with the full trade log and charts.')
     p.add_argument('--param', action='append', metavar='NAME=VALUE',
-                    help='Override one strategy param; repeatable. Beats --params-from.')
+                    help='Override one strategy param; repeatable.')
     p.add_argument('--results-dir', default=DEFAULT_RESULTS_DIR)
     p.add_argument('--keep-last', type=int, default=None,
                     help='Delete result files from all but the N most recent runs')
     p.set_defaults(func=cmd_backtest)
-
-    p = sub.add_parser('show-space', help="Print the ranges a strategy's params are scanned over.")
-    p.add_argument('--strategy', required=True, metavar='NAME',
-                    help=f'A discovered name ({", ".join(_strategy_names())}) '
-                         f"or a 'module.path:ClassName' reference")
-    p.set_defaults(func=cmd_show_space)
-
-    from research.validate import CHECKS
-
-    p = sub.add_parser(
-        'validate',
-        help='Check one parameter set for overfitting: walk-forward, sub-period, '
-             'sensitivity, bootstrap, PBO and Deflated Sharpe.',
-    )
-    p.add_argument('--strategy', required=True, metavar='NAME',
-                    help=f'A discovered name ({", ".join(_strategy_names())}) '
-                         f"or a 'module.path:ClassName' reference")
-    _add_data_args(p)
-    _add_split_args(p)
-    p.add_argument('--param', action='append', metavar='NAME=VALUE',
-                    help='The parameter value to check; repeatable. Defaults to the '
-                         "strategy's own declared default.")
-    p.add_argument('--params-from', default=None,
-                    help="Read params from an earlier `ft.py validate` report.")
-    p.add_argument('--lots', type=int, default=None,
-                    help='Lots per trade (strategies that use it); default 1')
-    p.add_argument('--trials-tried', type=int, default=None,
-                    help='How many parameter sets you tried before settling on this one. '
-                         "Feeds the Deflated Sharpe's multiple-testing correction, which "
-                         'otherwise assumes only the neighbourhood grid was ever looked '
-                         'at and so reads optimistically for a hand-tuned strategy.')
-    p.add_argument('--n-periods', type=int, default=0,
-                    help='Sub-periods to split the sample into; 0 (default) splits by '
-                         'calendar year')
-    p.add_argument('--bootstrap-draws', type=int, default=2000)
-    p.add_argument('--bootstrap-block', type=int, default=20,
-                    help='Bootstrap block length in bars; set it at least as long as a '
-                         'typical holding period (default: %(default)s)')
-    p.add_argument('--skip', action='append', choices=list(CHECKS), default=None,
-                    help='Leave a check out; repeatable')
-    p.add_argument('--fail-on-warn', action='store_true',
-                    help='Exit non-zero when any check flags, for use in a gate')
-    p.add_argument('--results-dir', default=None)
-    p.set_defaults(func=cmd_validate)
 
     from web.config import DEFAULT_HOST, DEFAULT_PORT
 

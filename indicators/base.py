@@ -93,10 +93,12 @@ class Indicator:
     ``outputs``   Tuple of :class:`Output`, one per drawn series
     ============= =================================================================
 
-    ``params`` / ``space`` / ``fixed_params`` / ``constraints`` work exactly as
-    they do on ``Strategy`` and go through the same ``research.space``
-    helpers -- one parameter model for both, so nothing that reads one has
-    to learn the other.
+    ``params`` / ``space`` / ``fixed_params`` work exactly as they do on
+    ``Strategy`` and go through the same ``core.params`` helpers -- one
+    parameter model for both, so nothing that reads one has to learn the
+    other. ``constraints`` is indicator-only: a tuple of
+    ``callable(params_dict) -> bool`` that a param override from a URL must
+    satisfy, e.g. ``lambda p: p['fast'] < p['slow']``.
 
     ``space`` earns its keep here for a second reason: the values endpoint
     takes param overrides from a URL, and the declared bounds are what stop

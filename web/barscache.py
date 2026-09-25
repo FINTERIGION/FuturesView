@@ -27,7 +27,7 @@ from datafeed.data_manager import DataManager
 
 from web.config import MARKET_CACHE_SIZE
 
-logger = logging.getLogger('futurestoolkit.web')
+logger = logging.getLogger('futuresview.web')
 
 _Key = Tuple[str, str, str]
 

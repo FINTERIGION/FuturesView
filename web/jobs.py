@@ -27,10 +27,10 @@ from typing import Any, Callable, Deque, Dict, List, Optional
 
 from web.config import JOB_LOG_BUFFER, JOB_MAX_WORKERS, JOB_RETENTION
 
-logger = logging.getLogger('futurestoolkit.web')
+logger = logging.getLogger('futuresview.web')
 
 _MONITORED_LOGGERS = (
-    'futurestoolkit', 'datafeed', 'research', 'core',
+    'futuresview', 'datafeed', 'core',
 )
 
 

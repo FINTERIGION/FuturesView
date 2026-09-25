@@ -31,10 +31,9 @@ Start from `strategies/my_strategy.py` if you want a template.
 
 | Attribute | Meaning |
 | --- | --- |
-| `params` | Dict of defaults; instance values live on `self.p`, overridden via `MyStrategy(**kw)`, `--param` or `--params-from` |
-| `space` | Plausible range per param, `{name: Int / Float / Categorical}` — perturbed one step by the sensitivity check, see [Overfitting Checks](validation.md) |
-| `fixed_params` | Params that must never be tuned (default `('lots',)`) |
-| `constraints` | Tuple of `callable(params) -> bool`; a perturbed set failing any is skipped by `validate`, e.g. `lambda p: p['fast_period'] < p['slow_period']` |
+| `params` | Dict of defaults; instance values live on `self.p`, overridden via `MyStrategy(**kw)` or `--param` |
+| `space` | Plausible range per param, `{name: Int / Float / Categorical}`, listed in the web panel's strategy catalog; undeclared params get one inferred from their default |
+| `fixed_params` | Params with no meaningful range, left out of `space` inference (default `('lots',)`) |
 
 ## Lifecycle
 

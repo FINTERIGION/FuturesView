@@ -25,9 +25,8 @@ _DEFAULT_TRADING_DAYS_PER_YEAR = 252
 
 # Every Sharpe and Sortino in this project is an *excess* ratio over this rate.
 # Named rather than left as a bare default because anything computing a Sharpe
-# outside this module -- `research.overfit.block_bootstrap` resampling the same
-# return series -- has to subtract the same thing, or the report carries two
-# numbers that look comparable and are not.
+# outside this module has to subtract the same thing, or it reports a number
+# that looks comparable and is not.
 DEFAULT_RISK_FREE_RATE = 0.03
 
 

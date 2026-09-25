@@ -122,15 +122,26 @@ def test_can_trade_reports_a_still_warming_symbol_as_untradable(market):
     assert warm.can_trade('SA')
 
 
-def test_caller_floor_still_applies_to_every_symbol(market):
-    """The research pad must keep the whole universe out, late lister or not."""
-    strategy = _Indicators()
-    eng = Engine(market, strategy, initial_cash=1_000_000.0, warmup_bars=30)
-    strategy.setup(SetupContext(eng))
+def test_equity_curve_starts_after_indicator_warmup(market):
+    """Bars before the indicators are valid never reach `on_bar`, so recording
+    them would prepend flat zero-return bars no decision produced."""
+    class _LateIndicator(Strategy):
+        def setup(self, ctx):
+            for sym in ctx.symbols:
+                arr = np.ones(len(ctx.dates))
+                arr[:LATE_START] = np.nan
+                ctx.add_indicator('late', sym, arr)
 
-    assert eng.warmup_by_symbol == {'CF': 30, 'SA': 30}
-    assert eng.warmup_index == 30
-    assert eng.record_start == 30
+        def on_bar(self, ctx):
+            pass
+
+    strategy = _LateIndicator()
+    eng = Engine(market, strategy, initial_cash=1_000_000.0)
+    strategy.setup(SetupContext(eng))
+    result = eng.run_backtest(SetupContext, BarContext)
+
+    assert eng.record_start == eng.warmup_index == LATE_START
+    assert len(result['equity_records']) == N_BARS - LATE_START
 
 
 # --------------------------------------------------------------------------
@@ -146,25 +157,12 @@ def test_require_warmup_only_ever_raises(market):
     assert eng.warmup_by_symbol['CF'] == 30
 
 
-def test_require_warmup_never_undercuts_the_caller_floor(market):
-    """A research pad is a floor, not a suggestion."""
-    eng = Engine(market, _Indicators(), warmup_bars=20)
-    assert eng.require_warmup('CF', 3) == 20
-    assert eng.warmup_by_symbol['CF'] == 20
-
-
 def test_require_warmup_leaves_the_other_products_alone(market):
     eng = Engine(market, _Indicators())
     eng.require_warmup('SA', 33)
     assert eng.warmup_by_symbol == {'CF': 0, 'SA': 33}
     assert eng.warmup_index == 0        # CF is unaffected and trades from bar 0
     assert eng.warmup_full == 33
-
-
-def test_require_warmup_starts_an_unknown_symbol_at_the_floor(market):
-    """A symbol the market does not carry still respects the pad, not zero."""
-    eng = Engine(market, _Indicators(), warmup_bars=15)
-    assert eng.require_warmup('ZZ', 4) == 15
 
 
 def _mixed_universe(n=6):

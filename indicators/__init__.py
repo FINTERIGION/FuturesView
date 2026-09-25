@@ -82,7 +82,7 @@ def load_registered_indicator(name: str) -> type:
     top-level code before anything checks the result is even an ``Indicator``
     -- fine for a CLI argv, which is already running as the user, but not for
     a string that arrived over HTTP. The web panel has no authentication and
-    is bindable to a non-loopback address (``ft.py web --host``), so anything
+    is bindable to a non-loopback address (``main.py web --host``), so anything
     reachable from a request has to stay inside the registry. Private
     indicators lose nothing by it: they live under ``indicators/`` and are
     discovered automatically.

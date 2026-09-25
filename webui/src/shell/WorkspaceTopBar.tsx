@@ -36,7 +36,7 @@ export function WorkspaceTopBar({
           <span className="brand-mark">
             <Icon name="candles" size={15} />
           </span>
-          FuturesToolkit
+          FuturesView
         </span>
 
         {chartSymbol && (

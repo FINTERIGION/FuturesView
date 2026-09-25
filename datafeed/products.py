@@ -25,8 +25,8 @@ A contract is rolled out of on the first calendar day of the month
 ``roll_lead_months`` before its delivery month -- the 05 contract is dropped
 on April 1st. Both keys are optional; omitting them uses the module defaults
 below, so a product only needs to declare them when its cycle differs -- as
-SHFE rebar (01/05/10), gold and silver (06/12), and the non-ferrous metals
-(every month) do.
+SHFE rebar (01/05/10), bitumen (01/06/09/12), gold and silver (06/12), and
+the non-ferrous metals (every month) do.
 
 Contract codes are normalised to UPPERCASE + 4-digit YYMM regardless of venue
 (``RB2610``, ``C2601``), which is what ``parse_product`` and
@@ -156,6 +156,22 @@ def validate_product(code: str, meta: dict) -> dict:
     return out
 
 
+_COMMISSION_RATE_RE = re.compile(r'("commission_rate": )([-+0-9.eE]+)')
+
+
+def _scientific(value: float) -> str:
+    """Shortest scientific-notation spelling that round-trips: 1e-04, 1.5e-04.
+
+    ``json.dumps`` writes ``1e-4`` as ``0.0001`` but ``1e-5`` as ``1e-05``, so
+    commission rates would come out in two notations side by side.
+    """
+    for digits in range(17):
+        text = f'{value:.{digits}e}'
+        if float(text) == value:
+            return text
+    return repr(value)
+
+
 def save_registry(registry: Dict[str, dict], path: str = None) -> None:
     """Validate every entry, then persist atomically and reload in place.
 
@@ -172,11 +188,14 @@ def save_registry(registry: Dict[str, dict], path: str = None) -> None:
         for code, meta in registry.items()
     }
 
+    text = json.dumps(normalized, indent=2, ensure_ascii=False)
+    text = _COMMISSION_RATE_RE.sub(lambda m: m.group(1) + _scientific(float(m.group(2))), text)
+
     directory = os.path.dirname(target) or '.'
     fd, tmp_path = tempfile.mkstemp(dir=directory, prefix='.products.', suffix='.json.tmp')
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            json.dump(normalized, f, indent=2, ensure_ascii=False)
+            f.write(text)
             f.write('\n')
         os.replace(tmp_path, target)
     except Exception:

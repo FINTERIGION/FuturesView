@@ -78,7 +78,7 @@ def load_registered_strategy(name: str) -> type:
     module's top-level code before anything checks the result is even a
     ``Strategy`` -- fine for a CLI argv, which is already running as the
     user, but not for a string that arrived over HTTP. The web panel has no
-    authentication and is bindable to a non-loopback address (``ft.py web
+    authentication and is bindable to a non-loopback address (``main.py web
     --host``), so anything reachable from a request body has to stay inside
     the registry. Private strategies lose nothing by it: they live under
     ``strategies/`` and are discovered automatically.

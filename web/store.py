@@ -30,7 +30,7 @@ from typing import Iterable, List, Optional
 from web.config import DB_PATH, RUN_RETENTION, WEB_RESULTS_DIR
 from web.serialize import jsonable
 
-logger = logging.getLogger('futurestoolkit.web')
+logger = logging.getLogger('futuresview.web')
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (

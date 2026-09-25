@@ -20,7 +20,7 @@ from web.schemas import DataUpdateRequest
 from web.serialize import jsonable
 
 router = APIRouter(prefix='/api/data', tags=['data'])
-logger = logging.getLogger('futurestoolkit.web')
+logger = logging.getLogger('futuresview.web')
 
 # Symbols with a download in flight. Two updates of the same product write the
 # same `{sym}.csv` / `{sym}_weighted.csv` / `{sym}.meta.json`: each file lands

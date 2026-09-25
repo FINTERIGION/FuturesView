@@ -17,13 +17,11 @@ class MyStrategy(Strategy):
          valid value -- no manual NaN checks needed).
       2. Implement trading logic in ``on_bar``.
       3. Or add a new file under strategies/ -- it is picked up automatically
-         by ``strategies.discover_strategies()`` (used by ``ft.py`` and the
+         by ``strategies.discover_strategies()`` (used by ``main.py`` and the
          web panel), no registration needed.
       4. Optionally declare a ``space`` alongside ``params`` to say what range
          each one is plausible over, e.g. ``space = {'period': Int(5, 60)}``.
-         ``ft.py validate`` perturbs one step within it to check the result
-         does not depend on the exact value. If omitted, a range is inferred
-         from each param's default (see ``ft.py show-space``).
+         If omitted, a range is inferred from each param's default.
 
     Available on ``BarContext``:
       ctx.bar(sym)                  Bar(open, high, low, close, settle, volume, oi)

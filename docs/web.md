@@ -1,10 +1,10 @@
 # Web Panel
 
-A local browser UI over the same engine the CLI uses: manage the product registry, download data, run backtests with live progress and interactive charts, and browse run history. Overfitting checks stay in the CLI (`ft.py validate`). Writing or editing a strategy stays in the editor.
+A local browser UI over the same engine the CLI uses: manage the product registry, download data, run backtests with live progress and interactive charts, and browse run history. Writing or editing a strategy stays in the editor.
 
 ```bash
 pip install -e ".[web]"
-python ft.py web
+python main.py web
 ```
 
 That serves the pre-built frontend from `web/static/`. To change the frontend, rebuild it:
@@ -15,7 +15,7 @@ npm install           # first time only
 npm run build         # writes to ../web/static
 ```
 
-`python ft.py web --host 0.0.0.0` binds beyond localhost; the panel has no authentication and can rewrite the product registry and delete data files, so only do this on a network you trust.
+`python main.py web --host 0.0.0.0` binds beyond localhost; the panel has no authentication and can rewrite the product registry and delete data files, so only do this on a network you trust.
 
 Two checks stop a web page you have open from driving the API through your browser. Every request must carry a Host header naming the panel (`FT_WEB_ALLOWED_HOSTS` widens the list), and every write (POST/PUT/PATCH/DELETE) that carries an `Origin` must come from the panel's own address or the Vite dev server, or it is refused with 403. Behind a reverse proxy that rewrites the Host header, list the public origin in `FT_WEB_ALLOWED_ORIGINS`, e.g. `https://panel.example`.
 
@@ -51,10 +51,10 @@ is collapsed or behind another tab.
 
 ```
 web/                      FastAPI backend
-  app.py                    App + SPA static mount (launched by `ft.py web`)
+  app.py                    App + SPA static mount (launched by `main.py web`)
   config.py                 Paths, host/port defaults
   jobs.py                   Background job manager (thread pool + SSE)
-  marketcache.py            LRU over research.runner_api.load_market
+  marketcache.py            load_market + an LRU over it
   barscache.py              LRU over DataManager.load_dataframe (chart + indicator reads)
   store.py                  SQLite run-history index (results/webpanel.db)
   serialize.py              JSON-safe conversion (inf/NaN/date/numpy)

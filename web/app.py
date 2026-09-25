@@ -1,6 +1,6 @@
-"""FastAPI app for the FuturesToolkit web panel.
+"""FastAPI app for the FuturesView web panel.
 
-Run with ``python ft.py web`` (which owns the CLI flags and the
+Run with ``python main.py web`` (which owns the CLI flags and the
 bind-address warning) or ``uvicorn web.app:app`` (prod-ish, still
 single-process/single-machine).
 """
@@ -24,7 +24,7 @@ from web.routers import backtest, data, indicators, jobs, products, runs, strate
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s %(message)s')
 
-app = FastAPI(title='FuturesToolkit Web Panel')
+app = FastAPI(title='FuturesView Web Panel')
 
 
 class HostHeaderMiddleware:
@@ -93,13 +93,13 @@ class WriteOriginMiddleware:
 _ALLOWED_HOSTS = allowed_hosts()
 app.add_middleware(HostHeaderMiddleware, allowed=_ALLOWED_HOSTS)
 if '*' in _ALLOWED_HOSTS:
-    logging.getLogger('futurestoolkit.web').warning(
+    logging.getLogger('futuresview.web').warning(
         'Host header check is OFF (%s contains "*"): this panel will answer to any '
         'hostname, including one an attacker points at it from a page the user has '
         'open. Name the hosts you serve it under instead.', 'FT_WEB_ALLOWED_HOSTS',
     )
 else:
-    logging.getLogger('futurestoolkit.web').info(
+    logging.getLogger('futuresview.web').info(
         'Host header restricted to: %s', ', '.join(_ALLOWED_HOSTS),
     )
 

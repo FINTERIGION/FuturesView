@@ -38,7 +38,6 @@ class Engine:
         strategy,
         initial_cash: float = 100_000.0,
         slippage: float = 0.0,
-        warmup_bars: int = 0,
     ):
         self.market = market
         self.symbols = market.symbols
@@ -93,17 +92,8 @@ class Engine:
         # Warmup is tracked per product, not once for the whole universe: a
         # product listed late (or simply missing early history) must not hold
         # the rest of the universe out of the market. ``require_warmup`` only
-        # ever raises a symbol's entry, never lowers it, so the caller-supplied
-        # floor -- used by research/runner_api.py to hide a leading pad window
-        # from both trading and the equity curve -- survives registration.
-        self._warmup_floor = int(warmup_bars)
-        self.warmup_by_symbol: Dict[str, int] = {
-            sym: self._warmup_floor for sym in self.symbols
-        }
-        # Floor on ``record_start``, kept separate from ``warmup_index`` only
-        # so that indicator registration can never make the equity curve start
-        # *earlier* than the caller asked for.
-        self._record_from = int(warmup_bars)
+        # ever raises a symbol's entry, never lowers it.
+        self.warmup_by_symbol: Dict[str, int] = {sym: 0 for sym in self.symbols}
 
         self.equity_records: List[dict] = []
         self.signal_log: List[dict] = []
@@ -119,18 +109,18 @@ class Engine:
         Per-product readiness is enforced separately, in ``warmup_by_symbol``.
         """
         if not self.warmup_by_symbol:
-            return self._warmup_floor
+            return 0
         return min(self.warmup_by_symbol.values())
 
     @property
     def warmup_full(self) -> int:
         """First bar on which *every* product can trade.
 
-        This is the pad a caller needs if it wants the whole universe live from
-        the first bar of a window -- see ``research.warmup.probe_warmup``.
+        An absolute bar index, so it includes however long the last product
+        took to *list*, not only its indicator warmup.
         """
         if not self.warmup_by_symbol:
-            return self._warmup_floor
+            return 0
         return max(self.warmup_by_symbol.values())
 
     def require_warmup(self, sym: str, first_valid: int) -> int:
@@ -138,31 +128,23 @@ class Engine:
 
         Monotonic on purpose -- it raises a product's warmup and never lowers
         it -- so indicators registered in any order settle on the strictest
-        one, and the caller-supplied floor is never undercut. A symbol the
-        market does not carry starts from that same floor rather than from
-        zero. This is the only supported way to move ``warmup_by_symbol``.
+        one. This is the only supported way to move ``warmup_by_symbol``.
         """
-        current = self.warmup_by_symbol.get(sym, self._warmup_floor)
+        current = self.warmup_by_symbol.get(sym, 0)
         bar = max(current, int(first_valid))
         self.warmup_by_symbol[sym] = bar
         return bar
 
     @property
     def record_start(self) -> int:
-        """First bar that appears in ``equity_records``.
+        """First bar that appears in ``equity_records``: ``warmup_index``.
 
-        Never earlier than ``warmup_index``, which indicator registration
-        raises past the caller's floor whenever the registered indicators need
-        more history than the supplied ``warmup_bars`` covers. Bars in
-        ``[warmup_bars, warmup_index)`` are ones ``_signal_phase`` skips
-        entirely, so recording them would prepend a run of flat, zero-return
-        bars that no decision of the strategy's produced -- deflating the
-        window's Sharpe, volatility and capital exposure by an amount that
-        varies with each parameter set's lookback, i.e. unevenly across the
-        parameter sets one validation run compares. ``research/runner_api.run_window`` reports the
-        absolute bar this lands on as ``effective_start``.
+        Bars before it are ones ``_signal_phase`` skips entirely, so recording
+        them would prepend a run of flat, zero-return bars that no decision of
+        the strategy's produced -- deflating Sharpe, volatility and capital
+        exposure by an amount that varies with the strategy's lookback.
         """
-        return max(self._record_from, self.warmup_index)
+        return self.warmup_index
 
     # ------------------------------------------------------------------
     # Contract / price helpers
@@ -208,10 +190,9 @@ class Engine:
 
         False means the contract is finished as far as this run can see, so
         waiting for a real price on it is waiting for something that will
-        never arrive. On a *sliced* market (a research window) this answers
-        the question locally -- a contract still alive past ``window.end`` is
-        finished within the window -- which is the right answer for a backtest
-        that ends there anyway.
+        never arrive. A contract still alive past the run's end date is
+        finished within it, which is the right answer for a backtest that
+        ends there anyway.
         """
         panel = self.market.products.get(sym)
         series = panel.contracts.get(contract) if panel is not None else None
@@ -731,11 +712,9 @@ class Engine:
             self.blown_up_bar = i
 
         if i < self.record_start:
-            # Warmup/pad window: valued for bookkeeping continuity only.
-            # Excluded from the equity curve so a research window's metrics
-            # reflect only bars the strategy actually traded on, not the
-            # history before it -- neither the caller's pad nor the extra
-            # bars an indicator's own lookback pushed the start out by.
+            # Warmup window: valued for bookkeeping continuity only. Excluded
+            # from the equity curve so the metrics reflect only bars the
+            # strategy actually traded on, not its indicators' lookback.
             self._prev_equity = equity
             return
 

@@ -311,6 +311,18 @@
   color: var(--text-muted);
 }
 
+/* A control with a button beside it, e.g. the strategy select and its reload. */
+.field-row {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.field-row > select,
+.field-row > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .field-wide {
   grid-column: 1 / -1;
 }

@@ -540,7 +540,7 @@ def _raw_get(path: str) -> tuple:
     ('/../../datafeed/products.json', b'"exchange"'),
     ('/../../results/webpanel.db', b'SQLite format'),
     ('/../../../../../../etc/passwd', b'root:'),
-    ('/../../pyproject.toml', b'futurestoolkit'),
+    ('/../../pyproject.toml', b'futuresview'),
     ('/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd', b'root:'),
     ('/assets/../../../../../../../../etc/passwd', b'root:'),
 ])
@@ -601,7 +601,7 @@ def _collect_stream(manager, job_id, *, timeout=60.0):
 def job_logger():
     """The engine loggers the manager listens on default to the root level;
     pin INFO so a test's log lines actually reach the handler."""
-    log = logging.getLogger('futurestoolkit')
+    log = logging.getLogger('futuresview')
     previous = log.level
     log.setLevel(logging.INFO)
     yield log
@@ -912,7 +912,7 @@ def test_strategy_detail_refuses_a_module_path_key_without_importing_it(client, 
 def test_registry_only_loader_rejects_what_the_cli_loader_still_accepts():
     """The two loaders are deliberately not interchangeable.
 
-    ``ft.py`` keeps the ``'module:Class'`` escape hatch -- an argv is already
+    ``main.py`` keeps the ``'module:Class'`` escape hatch -- an argv is already
     running as the user -- while every web entry point is restricted to names
     the registry actually discovered.
     """
@@ -1145,7 +1145,7 @@ def test_write_origin_matching_and_the_environment(monkeypatch):
 
 
 def test_allowed_hosts_reads_the_environment(monkeypatch):
-    """`ft.py web` widens the list through this variable when asked to bind
+    """`main.py web` widens the list through this variable when asked to bind
     somewhere other than loopback, where no default could guess the name the
     operator reaches the box by."""
     from web.config import ALLOWED_HOSTS_ENV, DEFAULT_ALLOWED_HOSTS, allowed_hosts
@@ -1194,15 +1194,15 @@ def test_binding_off_loopback_derives_an_allowlist_rather_than_disabling_the_che
     address *is* the Host a browser sends, so it needs no guessing; a wildcard
     bind falls back to this machine's own names, none of which an attacker's
     rebinding page can present."""
-    import ft
+    import main
 
-    assert ft._panel_allowed_hosts('192.168.1.5') == ['192.168.1.5']
-    assert ft._panel_allowed_hosts('fe80::1') == ['[fe80::1]']
+    assert main._panel_allowed_hosts('192.168.1.5') == ['192.168.1.5']
+    assert main._panel_allowed_hosts('fe80::1') == ['[fe80::1]']
 
-    wildcard = ft._panel_allowed_hosts('0.0.0.0')
+    wildcard = main._panel_allowed_hosts('0.0.0.0')
     assert '*' not in wildcard
     assert 'localhost' in wildcard and '127.0.0.1' in wildcard
-    assert ft._panel_allowed_hosts('::') == wildcard
+    assert main._panel_allowed_hosts('::') == wildcard
 
 
 def test_a_run_left_running_by_a_dead_server_is_adopted_on_reconnect(tmp_path, monkeypatch):
