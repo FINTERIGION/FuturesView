@@ -160,6 +160,18 @@ export const en = {
     indicatorFailed: '{{name}} could not be computed: {{message}}',
     indicatorNeedsMoreBars: '{{names}} needs more bars than this range has, so it has nothing to draw yet.',
     tooManyIndicatorPanes: '{{count}} more indicator pane(s) hidden — at most {{max}} fit under the price chart.',
+    editIndicatorParams: 'Edit {{name}} parameters',
+    customParams: 'Custom parameters',
+    applyParams: 'Apply',
+    resetParams: 'Defaults',
+    resetIndicatorParams: 'Reset parameters',
+    paramHint: '{{low}} – {{high}} · default {{value}}',
+    paramHintNoRange: 'default {{value}}',
+    paramRequired: 'Required',
+    paramNotNumber: 'Must be a number',
+    paramNotInteger: 'Must be a whole number',
+    paramOutOfRange: 'Must be between {{low}} and {{high}}',
+    paramNotAChoice: 'Pick one of the listed values',
   },
 }
 

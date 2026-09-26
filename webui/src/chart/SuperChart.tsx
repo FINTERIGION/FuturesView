@@ -10,6 +10,7 @@ import { Icon } from '../components/Icon'
 import { useIsDarkMode } from '../theme/useIsDarkMode'
 import { useWorkspace } from '../shell/WorkspaceContext'
 import { ChartToolbar } from './ChartToolbar'
+import { activeOverrides } from './indicatorParams'
 
 /**
  * The main screen: one product's OI-weighted daily candlestick, always
@@ -24,7 +25,8 @@ import { ChartToolbar } from './ChartToolbar'
 export function SuperChart({ productName }: { productName?: string }) {
   const { t } = useTranslation()
   const dark = useIsDarkMode()
-  const { chartSymbol, setChartSymbol, showVolume, indicators, runId, setRunId } = useWorkspace()
+  const { chartSymbol, setChartSymbol, showVolume, indicators, indicatorParams, setIndicatorParams, runId, setRunId } =
+    useWorkspace()
 
   // The catalog is what says whether a selected indicator draws on the price
   // pane or in its own, so it is fetched whether or not anything is selected.
@@ -41,18 +43,27 @@ export function SuperChart({ productName }: { productName?: string }) {
     .map((key) => (catalog ?? []).find((c) => c.key === key))
     .filter((info): info is IndicatorInfo => Boolean(info) && info!.errors.length === 0)
 
+  // The params are part of the key, so each set is cached on its own and
+  // flipping back to one already fetched redraws without a request. The
+  // editor seeds this same key when its server check succeeds -- see
+  // chart/IndicatorParamsEditor.tsx.
+  const overridesOf = (info: IndicatorInfo) => activeOverrides(info, indicatorParams[info.key])
   const values = useQueries({
-    queries: selected.map((info) => ({
-      queryKey: ['indicator', chartSymbol, info.key],
-      queryFn: () => indicatorsApi.values(chartSymbol, info.key),
-      enabled: Boolean(chartSymbol),
-      staleTime: 5 * 60 * 1000,
-      retry: false,
-    })),
+    queries: selected.map((info) => {
+      const params = overridesOf(info)
+      return {
+        queryKey: ['indicator', chartSymbol, info.key, params],
+        queryFn: () => indicatorsApi.values(chartSymbol, info.key, params),
+        enabled: Boolean(chartSymbol),
+        staleTime: 5 * 60 * 1000,
+        retry: false,
+      }
+    }),
   })
 
   const layers: IndicatorLayer[] = selected.map((info, i) => ({
     info,
+    params: { ...info.params, ...overridesOf(info) },
     // `null` while in flight: the pane is laid out from the *selection*, so
     // panes do not shuffle as each query resolves one after another.
     values: values[i]?.data ?? null,
@@ -205,6 +216,14 @@ export function SuperChart({ productName }: { productName?: string }) {
             <div key={info.key} className="hint-banner warning">
               <Icon name="alert" />
               <span>{t('workspace.indicatorFailed', { name: info.label, message: errorMessage(error) })}</span>
+              {/* Saved params the class now refuses -- it narrowed a range
+                  or added a constraint under a reload -- are the one cause
+                  of this banner the user can clear from here. */}
+              {Object.keys(overridesOf(info)).length > 0 && (
+                <button className="btn btn-sm" onClick={() => setIndicatorParams(info.key, {})}>
+                  {t('workspace.resetIndicatorParams')}
+                </button>
+              )}
             </div>
           ))}
           {starved.length > 0 && (

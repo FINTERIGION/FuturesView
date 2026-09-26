@@ -3,7 +3,7 @@
 Runs one strategy over a date range and writes a trade log, five charts and a metrics summary.
 
 ```bash
-python main.py backtest --symbols SA CF RB --start 2020-01-01 --end 2026-12-31 --strategy double_ma --cash 200000
+python main.py backtest --symbols CF FG --start 2020-01-01 --end 2026-12-31 --strategy double_ma --cash 100000
 ```
 
 ## Flags

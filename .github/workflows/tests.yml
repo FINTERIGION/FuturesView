@@ -21,9 +21,8 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        # The extras in pyproject.toml, not requirements.txt: the web panel's
-        # deps (fastapi, uvicorn, httpx) live only there, and tests/test_web_api.py
-        # fails at import without them.
+        # pyproject.toml is the only pin set. The web extra (fastapi, uvicorn,
+        # httpx) is needed here: tests/test_web_api.py fails at import without it.
         run: pip install -e ".[test,web,lint]"
 
       # Rules in pyproject.toml's [tool.ruff.lint]: correctness checks only.

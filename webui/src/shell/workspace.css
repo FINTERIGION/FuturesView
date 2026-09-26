@@ -223,12 +223,18 @@ body.drawer-resizing .workspace {
   position: relative;
 }
 
+/* Sized to its widest row. Left to shrink-to-fit, an absolute box inside the
+   picker gets only the button's width to fit into, so it sat at min-width
+   whatever the labels said -- and with the shorter Chinese button and wider
+   pane badge, that cut names off mid-word. */
 .indicator-menu {
   position: absolute;
   top: calc(100% + var(--sp-1));
   right: 0;
   z-index: var(--z-pop);
+  width: max-content;
   min-width: 268px;
+  max-width: min(440px, calc(100vw - 32px));
   max-height: 60vh;
   overflow-y: auto;
   padding: var(--sp-1);
@@ -271,30 +277,61 @@ body.drawer-resizing .workspace {
   color: var(--text-muted);
 }
 
+/* The row holds two controls side by side -- the tick box's label and the
+   params pencil -- because a button nested inside a <label> is invalid and
+   would toggle the box when clicked. */
 .indicator-row {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-1) var(--ease);
+}
+
+.indicator-row:hover,
+.indicator-row.is-editing {
+  background: var(--surface-2);
+}
+
+.indicator-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2);
-  border-radius: var(--radius-sm);
   font-size: var(--fs-md);
   cursor: pointer;
-  transition: background var(--dur-1) var(--ease);
-}
-
-.indicator-row:hover {
-  background: var(--surface-2);
 }
 
 .indicator-row-label {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* The effective params, "9, 3, 3" -- accent-coloured once any differ from
+   the class's defaults, so a customised row is visible without opening it.
+   At max-width it gives way first: the name says what the row is, the params
+   are one pencil-click away. */
+.indicator-row-params {
+  flex: 1 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.indicator-row-params.is-custom {
+  color: var(--accent);
+}
+
 .indicator-row-pane {
+  margin-left: auto;
   font-size: var(--fs-xs);
   color: var(--text-faint);
   padding: 0 var(--sp-1);
@@ -303,16 +340,92 @@ body.drawer-resizing .workspace {
   background: var(--surface-2);
 }
 
+/* Revealed on hover, like a product row's actions. The empty slot on a row
+   without one keeps every pane badge in the same column. */
+.indicator-row-edit,
+.indicator-row-edit-slot {
+  flex: none;
+  margin-right: var(--sp-1);
+}
+
+.indicator-row-edit-slot {
+  width: var(--h-sm);
+}
+
+.indicator-row-edit {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-1) var(--ease);
+}
+
+.indicator-row:hover .indicator-row-edit,
+.indicator-row:focus-within .indicator-row-edit,
+.indicator-row.is-editing .indicator-row-edit {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* A broken class stays listed, disabled, with its error on hover -- an
    indicator that silently vanished mid-edit is the harder thing to debug. */
 .indicator-row.is-broken {
-  cursor: not-allowed;
   opacity: 0.6;
+}
+
+.indicator-row.is-broken .indicator-row-main {
+  cursor: not-allowed;
 }
 
 .indicator-row-error {
   font-size: var(--fs-xs);
   color: var(--danger);
+}
+
+/* Takes the width the rows gave the menu rather than adding its own: the
+   inputs' intrinsic width would otherwise widen the menu when it opens. */
+.indicator-params {
+  contain: inline-size;
+  margin: var(--sp-1) var(--sp-1) var(--sp-2);
+  padding: var(--sp-2) var(--sp-2) var(--sp-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.indicator-params-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--sp-2);
+}
+
+.indicator-params .field {
+  margin-bottom: var(--sp-2);
+}
+
+/* Param names are Python identifiers, the same ones `--param` takes, so they
+   are shown as written rather than upper-cased like the form labels. */
+.indicator-params .field label {
+  font-family: var(--mono);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted);
+}
+
+.indicator-params .field input,
+.indicator-params .field select {
+  min-height: var(--h-sm);
+  font-size: var(--fs-sm);
+}
+
+.indicator-params-error {
+  margin-bottom: var(--sp-2);
+}
+
+.indicator-params-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding-bottom: var(--sp-1);
 }
 
 /* ============================================================================

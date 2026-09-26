@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { errorMessage } from '../api/client'
 import { indicatorsApi } from '../api/endpoints'
 import { Icon } from '../components/Icon'
 import type { IndicatorInfo } from '../api/types'
 import { useWorkspace } from '../shell/WorkspaceContext'
+import { IndicatorParamsEditor } from './IndicatorParamsEditor'
+import { activeOverrides, editableParams, paramSummary } from './indicatorParams'
 
 /**
  * Pick what is drawn on the chart: every indicator class under `indicators/`,
@@ -24,12 +26,19 @@ import { useWorkspace } from '../shell/WorkspaceContext'
  * always the pane directly under the price -- heads the lower group rather
  * than being singled out. Where it differs from the rest is only that it
  * cannot break or be reloaded, which is what its tooltip says.
+ *
+ * Each row shows its effective params after the label, and the pencil that
+ * appears on hover opens an inline editor for them, the same way a product
+ * row reveals its edit button. Volume has no params, so it has no pencil.
  */
 export function IndicatorPicker() {
   const { t } = useTranslation()
-  const { indicators, toggleIndicator, showVolume, setShowVolume } = useWorkspace()
+  const { chartSymbol, indicators, toggleIndicator, showVolume, setShowVolume, indicatorParams, setIndicatorParams } =
+    useWorkspace()
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
+  /** The row whose params editor is open. One at a time. */
+  const [editing, setEditing] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
   const { data: catalog, isLoading, error } = useQuery({
@@ -52,10 +61,13 @@ export function IndicatorPicker() {
   useEffect(() => {
     if (!open) return
     const onPointerDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+      if (!rootRef.current?.contains(e.target as Node)) close()
     }
+    // Escape backs out one level: an open editor first, then the menu.
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key !== 'Escape') return
+      if (editing) setEditing(null)
+      else close()
     }
     document.addEventListener('mousedown', onPointerDown)
     document.addEventListener('keydown', onKeyDown)
@@ -63,7 +75,12 @@ export function IndicatorPicker() {
       document.removeEventListener('mousedown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [open])
+  }, [open, editing])
+
+  function close() {
+    setOpen(false)
+    setEditing(null)
+  }
 
   // Counts volume too: the button is this menu's summary, and a count that
   // ignored a ticked row would contradict the list it opens onto.
@@ -77,24 +94,64 @@ export function IndicatorPicker() {
 
   const catalogRow = (info: IndicatorInfo) => {
     const broken = info.errors.length > 0
+    const editable = !broken && editableParams(info).length > 0
+    const overrides = activeOverrides(info, indicatorParams[info.key])
+    const custom = Object.keys(overrides).length > 0
+    const isEditing = editing === info.key
     return (
-      <label
-        key={info.key}
-        className={`indicator-row${broken ? ' is-broken' : ''}`}
-        title={broken ? info.errors.join('\n') : info.docstring}
-      >
-        <input
-          type="checkbox"
-          disabled={broken}
-          checked={indicators.includes(info.key)}
-          onChange={() => toggleIndicator(info.key)}
-        />
-        <span className="indicator-row-label">{info.label}</span>
-        <span className="indicator-row-pane">
-          {info.pane === 'sub' ? t('workspace.paneSub') : t('workspace.paneMain')}
-        </span>
-        {broken && <span className="indicator-row-error">{t('workspace.indicatorBroken')}</span>}
-      </label>
+      <Fragment key={info.key}>
+        <div className={`indicator-row${broken ? ' is-broken' : ''}${isEditing ? ' is-editing' : ''}`}>
+          <label className="indicator-row-main" title={broken ? info.errors.join('\n') : info.docstring}>
+            <input
+              type="checkbox"
+              disabled={broken}
+              checked={indicators.includes(info.key)}
+              onChange={() => toggleIndicator(info.key)}
+            />
+            <span className="indicator-row-label">{info.label}</span>
+            {editable && (
+              <span
+                className={`indicator-row-params${custom ? ' is-custom' : ''}`}
+                title={custom ? t('workspace.customParams') : undefined}
+              >
+                {paramSummary(info, overrides)}
+              </span>
+            )}
+            <span className="indicator-row-pane">
+              {info.pane === 'sub' ? t('workspace.paneSub') : t('workspace.paneMain')}
+            </span>
+            {broken && <span className="indicator-row-error">{t('workspace.indicatorBroken')}</span>}
+          </label>
+          {editable ? (
+            <button
+              className="btn btn-sm btn-ghost btn-icon indicator-row-edit"
+              title={t('workspace.editIndicatorParams', { name: info.label })}
+              aria-label={t('workspace.editIndicatorParams', { name: info.label })}
+              aria-expanded={isEditing}
+              onClick={() => setEditing(isEditing ? null : info.key)}
+            >
+              <Icon name="pencil" size={13} />
+            </button>
+          ) : (
+            <span className="indicator-row-edit-slot" aria-hidden="true" />
+          )}
+        </div>
+        {isEditing && (
+          <IndicatorParamsEditor
+            info={info}
+            overrides={overrides}
+            chartSymbol={chartSymbol}
+            onCancel={() => setEditing(null)}
+            onApply={(next) => {
+              setIndicatorParams(info.key, next)
+              // Applying is asking to see it: an edit to an unticked row
+              // that changed nothing on screen would read as a dead button.
+              if (!indicators.includes(info.key)) toggleIndicator(info.key)
+              setEditing(null)
+            }}
+          />
+        )}
+      </Fragment>
     )
   }
 
@@ -104,7 +161,7 @@ export function IndicatorPicker() {
         className={`btn btn-sm ${count ? 'btn-primary' : ''}`}
         aria-expanded={open}
         aria-haspopup="true"
-        onClick={() => setOpen(!open)}
+        onClick={() => (open ? close() : setOpen(true))}
       >
         <Icon name="layers" size={14} />
         {count ? t('workspace.indicatorsWithCount', { count }) : t('workspace.indicators')}
@@ -150,11 +207,14 @@ export function IndicatorPicker() {
               nothing above it reads as the head's own border. */}
           {mainRows.length > 0 && <div className="indicator-menu-rule" />}
 
-          <label className="indicator-row" title={t('workspace.volumeHint')}>
-            <input type="checkbox" checked={showVolume} onChange={() => setShowVolume(!showVolume)} />
-            <span className="indicator-row-label">{t('workspace.paneVolume')}</span>
-            <span className="indicator-row-pane">{t('workspace.paneSub')}</span>
-          </label>
+          <div className="indicator-row">
+            <label className="indicator-row-main" title={t('workspace.volumeHint')}>
+              <input type="checkbox" checked={showVolume} onChange={() => setShowVolume(!showVolume)} />
+              <span className="indicator-row-label">{t('workspace.paneVolume')}</span>
+              <span className="indicator-row-pane">{t('workspace.paneSub')}</span>
+            </label>
+            <span className="indicator-row-edit-slot" aria-hidden="true" />
+          </div>
           {subRows.map(catalogRow)}
         </div>
       )}

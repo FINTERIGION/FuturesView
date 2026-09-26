@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api/client'
 import { indicatorsApi, productsApi, runsApi, strategiesApi } from '../api/endpoints'
+import type { IndicatorInfo, IndicatorValues } from '../api/types'
 import { EMPTY_BARS, INDICATORS, PRODUCTS, STRATEGIES, renderWorkspace } from '../test/utils'
 import { ChartWorkspace } from '../shell/ChartWorkspace'
 
@@ -105,7 +106,7 @@ describe('the indicator picker', () => {
     expect(indicatorsApi.values).not.toHaveBeenCalled()
     await user.click(screen.getByRole('checkbox', { name: /RSI/ }))
 
-    await waitFor(() => expect(indicatorsApi.values).toHaveBeenCalledWith('SA', 'rsi'))
+    await waitFor(() => expect(indicatorsApi.values).toHaveBeenCalledWith('SA', 'rsi', {}))
     // The count on the button is how the user sees the selection while the
     // menu is shut. Two, not one: volume is ticked by default and is a row in
     // this same menu, so it counts like any other.
@@ -184,5 +185,131 @@ describe('an indicator that fails to compute', () => {
     await user.click(screen.getByRole('checkbox', { name: /RSI/ }))
 
     expect(await screen.findByText(/boom from user code/)).toBeInTheDocument()
+  })
+})
+
+/** The pencil on a picker row. What a user sets there has to reach the
+ * values request, survive a reload, and never be saved if the server would
+ * refuse it -- a refused set blanks the indicator on every later visit. */
+describe('editing an indicator’s params', () => {
+  const CATALOG: IndicatorInfo[] = [
+    {
+      ...INDICATORS[0],
+      space: { fast: { kind: 'int', low: 2, high: 60 }, slow: { kind: 'int', low: 5, high: 250 } },
+    },
+    { ...INDICATORS[1], space: { period: { kind: 'int', low: 2, high: 100 } } },
+  ]
+  const VALUES: IndicatorValues = {
+    symbol: 'SA',
+    indicator: 'rsi',
+    params: {},
+    dates: [],
+    outputs: { rsi: { values: [], valid_from: 0 } },
+  }
+  const stored = () => JSON.parse(localStorage.getItem('ft.indicatorParams') ?? '{}')
+
+  beforeEach(() => {
+    vi.mocked(indicatorsApi.list).mockResolvedValue(CATALOG)
+    vi.mocked(productsApi.bars).mockResolvedValue(EMPTY_BARS)
+    vi.mocked(indicatorsApi.values).mockResolvedValue(VALUES)
+  })
+
+  async function openEditor(name: string) {
+    const user = userEvent.setup()
+    renderWorkspace(<ChartWorkspace />, { path: '/?symbol=SA' })
+    await user.click(await screen.findByRole('button', { name: /^Indicators/ }))
+    await user.click(await screen.findByRole('button', { name: `Edit ${name} parameters` }))
+    return user
+  }
+
+  it('applies the new params to the chart, remembers them, and ticks the row', async () => {
+    const user = await openEditor('RSI')
+    const period = screen.getByLabelText('period')
+    expect(period).toHaveValue(14)
+
+    await user.clear(period)
+    await user.type(period, '21')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(indicatorsApi.values).toHaveBeenCalledWith('SA', 'rsi', { period: 21 }))
+    expect(screen.queryByLabelText('period')).toBeNull()
+    expect(stored()).toEqual({ rsi: { period: 21 } })
+    // Applying to an unticked row puts it on the chart: otherwise the edit
+    // would change nothing the user can see.
+    expect(screen.getByRole('checkbox', { name: /RSI/ })).toBeChecked()
+    expect(screen.getByText('21')).toHaveClass('is-custom')
+  })
+
+  it('flags an out-of-range value on its own field without saving it', async () => {
+    const user = await openEditor('RSI')
+    const period = screen.getByLabelText('period')
+    await user.clear(period)
+    await user.type(period, '500')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    expect(await screen.findByText('Must be between 2 and 100')).toBeInTheDocument()
+    expect(indicatorsApi.values).not.toHaveBeenCalledWith('SA', 'rsi', { period: 500 })
+    expect(stored()).toEqual({})
+  })
+
+  it('keeps the editor open with the server’s message when a constraint refuses the params', async () => {
+    // `fast < slow` is a Python lambda: the browser cannot check it, so the
+    // server's refusal is the only thing standing between it and storage.
+    vi.mocked(indicatorsApi.values).mockImplementation(async (_code, _key, params) => {
+      if (params?.fast === 30) throw new ApiError(422, 'Ma: those params violate one of its declared constraints')
+      return VALUES
+    })
+    const user = await openEditor('MA')
+    const fast = screen.getByLabelText('fast')
+    await user.clear(fast)
+    await user.type(fast, '30')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    expect(await screen.findByText(/violate one of its declared constraints/)).toBeInTheDocument()
+    expect(screen.getByLabelText('fast')).toHaveValue(30)
+    expect(stored()).toEqual({})
+  })
+
+  it('puts the defaults back with Defaults, and applying them clears the override', async () => {
+    localStorage.setItem('ft.indicators', JSON.stringify(['rsi']))
+    localStorage.setItem('ft.indicatorParams', JSON.stringify({ rsi: { period: 21 } }))
+    const user = await openEditor('RSI')
+    await waitFor(() => expect(indicatorsApi.values).toHaveBeenCalledWith('SA', 'rsi', { period: 21 }))
+    expect(screen.getByLabelText('period')).toHaveValue(21)
+
+    await user.click(screen.getByRole('button', { name: 'Defaults' }))
+    expect(screen.getByLabelText('period')).toHaveValue(14)
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(stored()).toEqual({}))
+    expect(indicatorsApi.values).toHaveBeenCalledWith('SA', 'rsi', {})
+  })
+
+  it('drops a saved param the class no longer declares instead of sending it', async () => {
+    // Renamed under a hot reload: the server would 422 on it, and the user
+    // could not even see it in the editor to fix it.
+    localStorage.setItem('ft.indicators', JSON.stringify(['rsi']))
+    localStorage.setItem('ft.indicatorParams', JSON.stringify({ rsi: { window: 9 } }))
+    renderWorkspace(<ChartWorkspace />, { path: '/?symbol=SA' })
+
+    await waitFor(() => expect(indicatorsApi.values).toHaveBeenCalledWith('SA', 'rsi', {}))
+  })
+
+  it('offers a reset on the chart’s banner when saved params are refused', async () => {
+    localStorage.setItem('ft.indicators', JSON.stringify(['rsi']))
+    localStorage.setItem('ft.indicatorParams', JSON.stringify({ rsi: { period: 21 } }))
+    vi.mocked(indicatorsApi.values).mockImplementation(async (_code, _key, params) => {
+      if (params?.period === 21) throw new ApiError(422, 'period=21 is outside its declared range 2..20')
+      return VALUES
+    })
+    const user = userEvent.setup()
+    renderWorkspace(<ChartWorkspace />, { path: '/?symbol=SA' })
+
+    expect(await screen.findByText(/outside its declared range/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Reset parameters' }))
+
+    await waitFor(() => expect(screen.queryByText(/outside its declared range/)).toBeNull())
+    expect(indicatorsApi.values).toHaveBeenCalledWith('SA', 'rsi', {})
+    expect(stored()).toEqual({})
   })
 })

@@ -47,7 +47,9 @@ Start from `indicators/my_indicator.py` if you want a template.
 | `fixed_params` | Params excluded from `space`. Empty by default, unlike `Strategy`'s `('lots',)` |
 | `constraints` | Tuple of `callable(params) -> bool`, e.g. `lambda p: p['fast'] < p['slow']` |
 
-Declare `space`. Besides documenting the parameter, it is what bounds a period arriving from the URL, so an absurd window never reaches TA-Lib. A param with no declared range falls back to a heuristic `value/4 .. value*4`.
+Declare `space`. Besides documenting the parameter, it is what bounds a period arriving from the URL, so an absurd window never reaches TA-Lib. It is also the range the panel's params editor shows under each field and checks before sending anything (see [Web Panel](web.md#editing-indicator-params)). A param with no declared range falls back to a heuristic `value/4 .. value*4`.
+
+The editor offers every param in `params` that is not in `fixed_params` and has a number, bool, or string default, or a `Categorical` space. It shows params by their Python names, the same names `p=name=value` takes.
 
 ## Outputs
 

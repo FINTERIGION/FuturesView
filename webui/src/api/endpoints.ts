@@ -64,10 +64,8 @@ export const strategiesApi = {
 export const indicatorsApi = {
   list: () => api.get<IndicatorInfo[]>('/indicators'),
   get: (key: string) => api.get<IndicatorInfo>(`/indicators/${seg(key)}`),
-  /** `params` is accepted today and sent as the same `p=name=value` token the
-   * CLI's `--param` uses, even though nothing in the UI overrides an
-   * indicator's defaults yet -- so wiring up a param editor later is a change
-   * to one component, not to this contract. */
+  /** `params` goes out as the same `p=name=value` token the CLI's `--param`
+   * uses. The picker's params editor sets it; see chart/indicatorParams.ts. */
   values: (code: string, key: string, params?: Record<string, unknown>, start?: string, end?: string) => {
     const q = new URLSearchParams()
     if (start) q.set('start', start)

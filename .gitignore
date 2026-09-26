@@ -38,4 +38,10 @@ indicators/*
 !indicators/rsi.py
 !indicators/bollinger.py
 !indicators/atr.py
+!indicators/kdj.py
+!indicators/cci.py
+!indicators/dmi.py
+!indicators/donchian.py
+!indicators/keltner.py
+!indicators/obv.py
 !indicators/my_indicator.py

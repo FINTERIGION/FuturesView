@@ -41,6 +41,11 @@ export interface IndicatorLayer {
    * is the *selection* that decides the layout, so panes do not jump around
    * as each query resolves. */
   values: IndicatorValues | null
+  /** What it is computed with: the class's defaults with the user's
+   * overrides on top, in declared order. Titles its pane; `info.params`
+   * when omitted. Passed in rather than read off `values`, so the title is
+   * already right while a new set's values are still in flight. */
+  params?: Record<string, unknown>
 }
 
 export interface SuperChartInput {
@@ -349,8 +354,8 @@ export function superChartOption(input: SuperChartInput): EChartsOption {
   // that immediately desyncs from the toolbar's toggles under `notMerge`.
   const paneTitles = allPanes.flatMap((pane, i) => {
     if (!pane.startsWith('ind:')) return []
-    const info = layerByKey.get(pane.slice(4))!.info
-    const args = Object.values(info.params)
+    const { info, params } = layerByKey.get(pane.slice(4))!
+    const args = Object.values(params ?? info.params)
     return [{
       text: args.length ? `${info.label}(${args.join(', ')})` : info.label,
       top: rects[i].top,

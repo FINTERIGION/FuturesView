@@ -1,7 +1,7 @@
 # Project Layout
 
 ```
-FuturesView/
+futures-view/
 ├── main.py                    # The CLI: data / backtest / web
 ├── plotting.py                # Chart generation
 ├── core/                      # Engine internals
@@ -23,7 +23,8 @@ FuturesView/
 │   └── my_strategy.py
 ├── indicators/                # Chart indicators -- same deal as strategies/ -- see docs/indicator.md
 │   ├── base.py                #   Indicator / IndicatorContext / Output
-│   ├── ma.py  ema.py  macd.py  rsi.py  bollinger.py  atr.py
+│   ├── ma.py  ema.py  bollinger.py  donchian.py  keltner.py
+│   ├── macd.py  rsi.py  kdj.py  cci.py  dmi.py  atr.py  obv.py
 │   └── my_indicator.py
 ├── datafeed/                  # Data pipeline
 │   ├── sources.py             #   per-exchange download & cache adapters (CZCE / SHFE / DCE)

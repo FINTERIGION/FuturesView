@@ -338,6 +338,16 @@ describe('superChartOption indicators', () => {
     expect(titles[0].text).toBe('RSI(14)')
   })
 
+  it('titles the pane with the params the user set, not the class defaults', () => {
+    const option = superChartOption({
+      dark: false,
+      bars: BARS,
+      panes: ['ind:rsi'],
+      indicators: [{ ...layer(indicator(), values()), params: { period: 21 } }],
+    })
+    expect((option.title as Array<{ text: string }>)[0].text).toBe('RSI(21)')
+  })
+
   it('keeps the existing panes working when no indicator is selected', () => {
     const option = superChartOption({ dark: false, bars: BARS, panes: ['volume'], indicators: [] })
     expect(grids(option)).toHaveLength(2)

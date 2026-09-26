@@ -29,7 +29,10 @@ from indicators.base import (
     value_range_json,
 )
 
-BUNDLED = ('ma', 'ema', 'macd', 'rsi', 'bollinger', 'atr')
+BUNDLED = (
+    'ma', 'ema', 'macd', 'rsi', 'bollinger', 'atr',
+    'kdj', 'cci', 'dmi', 'donchian', 'keltner', 'obv',
+)
 
 
 def build_frame(n_bars: int = 300, seed: int = 0) -> pd.DataFrame:
@@ -211,6 +214,57 @@ def test_nan_is_a_leading_run_only():
             isnan = np.isnan(arr)
             first_valid = int(np.argmax(~isnan))
             assert not isnan[first_valid:].any(), f'{key}.{out_key} has an embedded NaN'
+
+
+def _compute(key: str, df: pd.DataFrame, **params) -> dict:
+    cls = load_registered_indicator(key)
+    return cls(**params).compute(IndicatorContext(df, 'SA'), 'SA')
+
+
+def test_kdj_matches_a_hand_computed_first_bar():
+    """RSV 75 on the first full window, K and D seeded at 50 and smoothed
+    with ``SMA(X, 3, 1)``, J = 3K - 2D."""
+    from indicators.kdj import kdj
+
+    high = np.array([10.0, 11.0, 12.0, 11.0])
+    low = np.array([8.0, 9.0, 10.0, 9.0])
+    close = np.array([9.0, 10.0, 11.0, 10.0])
+    k, d, j = kdj(high, low, close, n=3, m1=3, m2=3)
+
+    assert np.isnan(k[:2]).all() and np.isnan(d[:2]).all()
+    assert k[2] == pytest.approx((75 + 2 * 50) / 3)
+    assert d[2] == pytest.approx((k[2] + 2 * 50) / 3)
+    # Bar 3: window 11/12/11 high, 9/10/9 low, close 10 -> RSV 100/3.
+    assert k[3] == pytest.approx((100 / 3 + 2 * k[2]) / 3)
+    np.testing.assert_allclose(j, 3 * k - 2 * d)
+
+
+def test_kdj_holds_through_a_flat_window():
+    """A window whose high equals its low has no RSV; K and D carry over
+    rather than jumping to an invented value or going NaN mid-series."""
+    from indicators.kdj import kdj
+
+    high = np.array([10.0, 11.0, 12.0, 12.0, 12.0, 12.0])
+    low = np.array([8.0, 9.0, 10.0, 12.0, 12.0, 12.0])
+    close = np.array([9.0, 10.0, 11.0, 12.0, 12.0, 12.0])
+    k, d, _ = kdj(high, low, close, n=3, m1=3, m2=3)
+
+    assert k[5] == k[4] and d[5] == d[4]
+
+
+@pytest.mark.parametrize('key', ['bollinger', 'donchian', 'keltner'])
+def test_channel_bands_bracket_the_middle(key):
+    out = _compute(key, build_frame())
+    valid = ~np.isnan(out['upper'])
+    assert (out['lower'][valid] <= out['mid'][valid]).all()
+    assert (out['mid'][valid] <= out['upper'][valid]).all()
+
+
+def test_donchian_bands_are_the_window_extremes():
+    df = build_frame()
+    out = _compute('donchian', df, period=20)
+    assert out['upper'][-1] == df['high'].iloc[-20:].max()
+    assert out['lower'][-1] == df['low'].iloc[-20:].min()
 
 
 def test_context_accessor_symbol_argument_is_optional():

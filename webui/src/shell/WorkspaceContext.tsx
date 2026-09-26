@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useStickyState } from '../hooks/useStickyState'
 
@@ -89,6 +89,18 @@ interface WorkspaceState {
   indicators: string[]
   toggleIndicator: (key: string) => void
 
+  /** Param overrides per indicator, `{indicator key: {param: value}}`.
+   *
+   * Only values that differ from the class's defaults are stored, so a
+   * default the author later changes in Python still reaches every param
+   * the user never touched. Sticky for the same reason `indicators` is: a
+   * preferred period is a preference. Read it through
+   * `chart/indicatorParams.ts`'s `activeOverrides`, which drops params the
+   * class no longer declares. */
+  indicatorParams: Record<string, Record<string, unknown>>
+  /** Replace one indicator's overrides; `{}` puts it back on its defaults. */
+  setIndicatorParams: (key: string, overrides: Record<string, unknown>) => void
+
   /** The product open in the sidebar's detail (create/edit) view; `'new'`
    * for the create form. `null` means the list view is showing. */
   editingProduct: string | 'new' | null
@@ -127,6 +139,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useStickyState('sidebarOpen', true)
   const [showVolume, setShowVolume] = useStickyState('showVolume', true)
   const [indicators, setIndicators] = useStickyState<string[]>('indicators', [])
+  const [indicatorParamsRaw, setIndicatorParamsRaw] = useStickyState<Record<string, Record<string, unknown>>>(
+    'indicatorParams',
+    {},
+  )
+  // Storage holds whatever an older build or a hand edit left there. Anything
+  // but an object is treated as "no overrides" rather than crashing the chart.
+  const indicatorParams = useMemo(
+    () =>
+      indicatorParamsRaw && typeof indicatorParamsRaw === 'object' && !Array.isArray(indicatorParamsRaw)
+        ? indicatorParamsRaw
+        : {},
+    [indicatorParamsRaw],
+  )
   const [editingProduct, setEditingProduct] = useState<string | 'new' | null>(null)
 
   const toggleIndicator = useCallback(
@@ -134,6 +159,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setIndicators(indicators.includes(key) ? indicators.filter((k) => k !== key) : [...indicators, key])
     },
     [indicators, setIndicators],
+  )
+
+  const setIndicatorParams = useCallback(
+    (key: string, overrides: Record<string, unknown>) => {
+      const next = { ...indicatorParams }
+      if (Object.keys(overrides).length > 0) next[key] = overrides
+      else delete next[key]
+      setIndicatorParamsRaw(next)
+    },
+    [indicatorParams, setIndicatorParamsRaw],
   )
 
   const runId = searchParams.get('run')
@@ -273,6 +308,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setShowVolume,
     indicators,
     toggleIndicator,
+    indicatorParams,
+    setIndicatorParams,
     editingProduct,
     setEditingProduct,
     backtestPrefill,

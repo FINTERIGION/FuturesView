@@ -15,14 +15,21 @@ from core.registry import discover_subclasses, snake_name
 from .atr import Atr
 from .base import Indicator, IndicatorContext, Output
 from .bollinger import Bollinger
+from .cci import Cci
+from .dmi import Dmi
+from .donchian import Donchian
 from .ema import Ema
+from .kdj import Kdj
+from .keltner import Keltner
 from .ma import Ma
 from .macd import Macd
+from .obv import Obv
 from .rsi import Rsi
 
 __all__ = [
     'Indicator', 'IndicatorContext', 'Output',
     'Ma', 'Ema', 'Macd', 'Rsi', 'Bollinger', 'Atr',
+    'Kdj', 'Cci', 'Dmi', 'Donchian', 'Keltner', 'Obv',
     'discover_indicators', 'load_indicator', 'load_registered_indicator', 'name_for',
 ]
 

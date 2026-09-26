@@ -1,33 +1,35 @@
 # FuturesView
 
-A self-built daily-bar backtesting engine for Chinese commodity futures, covering **CZCE**, **SHFE**, and **DCE**.
+**A chart-first research workspace for Chinese commodity futures** on **CZCE**, **SHFE**, and **DCE**, running locally in your browser on top of a self-built daily-bar backtesting engine.
 
-It downloads historical data straight from each exchange, builds open-interest–weighted daily bars for signals, executes on each product's registered main contracts, and exports equity curves, trade logs, and signal charts.
+Chart a product and run a backtest on that same picture. The panel and `main.py` share one engine, so a run gives the same numbers from either place.
 
 ## Features
 
-- **Data pipeline** — fetch history from three exchanges behind one interface, clean contract-level OHLC, and aggregate to OI-weighted continuous series
-- **Calendar execution** — signals on the weighted series; fills on the real main contracts declared per product, and rolled automatically
-- **Multi-product** — strategies loop over `ctx.symbols` and trade each independently, or trade the universe as a single cross-section
-- **Futures cost model** — per-product multiplier, margin ratio, and commission from `datafeed/products.py`, with long/short-symmetric equity accounting and daily forced liquidation on a margin breach
-- **Strategy API** — `Strategy` / `SetupContext` / `BarContext`, target-position order semantics (`ctx.set_target`), per-product indicator warmup skipping, protective stop/take-profit brackets
-- **Metrics & reports** — Sharpe, Sortino, Calmar, max drawdown & recovery, win rate, turnover, capital exposure, per-symbol and per-exit-reason breakdowns, forced-liquidation count
-- **Charts** — equity, returns, position, price & signals, summary plots
-- **Web panel** — a local browser UI for managing products, downloading data, running backtests with live progress, and browsing run history
+- **OI-weighted chart, rolls marked.** The charted product's full open-interest–weighted daily history, with roll points on the candles. Built-in indicators draw on the price pane or in their own panes; drop a file in `indicators/` and reload.
+- **Backtests on the same chart.** Fills land as markers, the test window is shaded, and the drawer shows equity, trades, and per-symbol / per-exit-reason breakdowns. Any past run reopens onto the chart.
+- **Signals on the continuous series, fills on real contracts.** Orders execute on each product's rolling main contract, with its multiplier, margin, commission, and daily forced liquidation.
+- **One pipeline for CZCE, SHFE, and DCE.** Contract-level OHLC is cleaned into the series both the panel and the CLI read. `main.py` runs the same downloads and backtests without a browser.
 
 ## Quick Start
 
-Requirement: Python 3.11+
+Requirements: Python 3.11+, and Node.js 20.19+ to build the frontend.
+
+Install the engine and the web server.
 
 ```bash
-cd FuturesView
-pip install -r requirements.txt
+git clone https://github.com/FINTERIGION/futures-view.git
+cd futures-view
+pip install -e ".[web]"
 ```
 
-Skip this if you only use the CLI.
+Build the frontend once.
 
 ```bash
-pip install -e ".[web]"
+cd webui
+npm install
+npm run build
+cd ..
 ```
 
 DCE needs credentials ([apply here](http://www.dce.com.cn/dce/channel/list/7000198.html)) for historical data.
@@ -37,22 +39,19 @@ export DCE_API_KEY=...
 export DCE_SECRET=...
 ```
 
-Download the data. **The first run takes about an hour**.
-
-```bash
-python main.py data
-```
-
-Run a backtest. Outputs (charts, trade log) land in `results/`.
-
-```bash
-python main.py backtest --symbols SA CF FG --start 2020-01-01 --end 2026-12-31 --strategy double_ma --cash 100000
-```
-
-Or drive it from the browser.
+Start the panel, then open <http://127.0.0.1:8000>.
 
 ```bash
 python main.py web
+```
+
+## Command Line
+
+The same data downloads and backtests also run without a browser. Backtest outputs (charts, trade log) land in `results/`.
+
+```bash
+python main.py data
+python main.py backtest --symbols CF FG --start 2020-01-01 --end 2026-12-31 --strategy double_ma --cash 100000
 ```
 
 | Subcommand   | What it does                                                    |
